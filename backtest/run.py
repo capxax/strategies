@@ -11,6 +11,7 @@ import pandas as pd
 import data
 from engine import backtest, metrics, buy_hold, periods_per_year
 from strategies import REGISTRY
+import strategies_digest  # noqa: F401  注册 FMZ digest 策略
 
 
 def valid(p):
@@ -42,7 +43,7 @@ def run_symbol(df, sym, args, ppy):
     bh_is, bh_oos = buy_hold(is_df, ppy), buy_hold(df.loc[oos_start:], ppy)
     rows = []
     for name, spec in REGISTRY.items():
-        if args.only and name not in args.only:
+        if (args.only and name not in args.only) or not name.startswith(args.prefix):
             continue
         best, best_p = -np.inf, None
         for p in grid(spec["grid"]):
@@ -96,6 +97,7 @@ def main():
     ap.add_argument("--min-trades", type=int, default=5)
     ap.add_argument("--min-sharpe", type=float, default=0.3)
     ap.add_argument("--only", nargs="*", help="只跑指定策略")
+    ap.add_argument("--prefix", default="", help="只跑名字以此开头的策略，如 fmz_")
     ap.add_argument("--out", default="reports")
     args = ap.parse_args()
     if args.fee is None:
@@ -119,7 +121,7 @@ def main():
     res["useful"] = verdict(res, args.min_sharpe)
     res["decay"] = res.oos_sharpe - res.is_sharpe
     os.makedirs(args.out, exist_ok=True)
-    tag = f"{args.source}_{args.interval}"
+    tag = f"{args.source}_{args.interval}{'_' + args.prefix.strip('_') if args.prefix else ''}"
     res.to_csv(os.path.join(args.out, f"detail_{tag}.csv"), index=False)
 
     summ = res.groupby("strategy").agg(
