@@ -59,6 +59,32 @@ def signals(df, p):
 
 # ---------------------------------------------------------------- 单个币
 
+def stop_state(close, pos, dd):
+    """逐日模拟止损，返回最后一根 K 线时的状态。
+    held：昨日收盘目标 > 0 且未处于止损状态时，今天持仓（与回测的执行时点一致）。"""
+    n = len(close)
+    stopped, held, peak, entry, stopped_at = False, False, 0.0, None, None
+    for k in range(n):
+        if stopped and pos[k] == 0:
+            stopped, stopped_at = False, None           # 信号全部离场，解除止损状态
+        want = pos[k] > 0 and not stopped
+        if want and not held:
+            held, peak, entry = True, close[k], k
+        elif not want:
+            held, entry = False, None
+        if held:
+            peak = max(peak, close[k])
+            if close[k] < peak * (1 - dd):
+                stopped, held, stopped_at = True, False, k
+    if held:
+        return {"stopped": False, "days_in": n - entry, "peak": float(peak), "stop": float(peak * (1 - dd)),
+                "entry_idx": entry + 1 if entry is not None else None, "stopped_since": None}
+    if stopped:
+        return {"stopped": True, "days_in": 0, "peak": float(peak), "stop": float(peak * (1 - dd)),
+                "entry_idx": None, "stopped_since": stopped_at}
+    return {"stopped": False, "days_in": 0, "peak": None, "stop": None, "entry_idx": None, "stopped_since": None}
+
+
 def _pct(a, b):
     return float(a / b - 1) if b else None
 
@@ -74,14 +100,12 @@ def coin_card(coin, meta, src, df, btc_ret, btc_pos, cfg):
     last = c.iloc[-1]
     pos = s["pos"]
     held = pos > 0
-    # 当前持仓段：天数、入场价、最高收盘、止损价
-    days_in, stop, peak, entry_px = 0, None, None, None
-    if held.iloc[-1]:
-        seg = c[c.index > held[::-1].idxmin()] if (~held).any() else c
-        days_in = len(seg)
-        peak = float(seg.max())
-        stop = peak * (1 - risk["stop_drawdown"])
-        entry_px = float(df.open.loc[seg.index[0]])
+    # 止损状态机（与回测一致）：持仓期间跟踪最高收盘价，收盘跌破 最高×(1−stop_drawdown) 即止损；
+    # 止损后保持空仓，直到四个信号全部离场（目标仓位回到 0）后再次出现信号才重新入场。
+    st = stop_state(c.values, pos.values, risk["stop_drawdown"])
+    stopped, days_in, peak, stop, entry_px = st["stopped"], st["days_in"], st["peak"], st["stop"], None
+    if st["entry_idx"] is not None:
+        entry_px = float(df.open.iloc[st["entry_idx"]]) if st["entry_idx"] < len(df) else None
     flips = []
     for k in ["s1", "s2", "s3", "s4"]:
         ch = s[k].diff().iloc[-7:]
@@ -108,7 +132,8 @@ def coin_card(coin, meta, src, df, btc_ret, btc_pos, cfg):
         "pos": float(pos.iloc[-1]), "pos_prev": float(pos.iloc[-2]),
         "days_in": days_in, "entry": entry_px, "peak": peak, "stop": stop,
         "stop_dist": _pct(stop, last) if stop else None,      # 止损价相对现价，正常为负
-        "stopped": bool(stop and last < stop),               # 收盘已跌破止损：应空仓，等信号重新入场
+        "stopped": stopped,                                  # 已止损：应空仓，等信号全部离场后重新出现
+        "stopped_since": st["stopped_since"] and df.index[st["stopped_since"]].strftime("%Y-%m-%d"),
         "levels": {
             "ema12": _f(s["e_fast"].iloc[-1]), "ema26": _f(s["e_slow"].iloc[-1]),
             "kc_upper": _f(s["upper"].iloc[-1]), "kc_mid": _f(s["mid"].iloc[-1]),

@@ -52,6 +52,9 @@ trading:
   rebalance_threshold: 0.2       # 持仓与目标相差超过目标的 20% 才调仓（目标为 0 时总是平仓）
   min_trade_usdt: 5              # 单笔调仓金额低于这个值不下单
   protective_buffer: 0.10        # 交易所保护止损单 = 止损价再往下 10%，只防盘中暴跌
+  max_drawdown: 0.35             # 账户权益从最高点回撤超过 35%：熔断，暂停加仓（减仓、平仓照常）
+  retry_minutes: 10              # 调仓有失败时，隔多少分钟重试（每根日线最多重试 3 次）
+  log_dir: logs                  # 交易记录目录：trades.csv / equity.csv / decisions.jsonl / monitor.log
   okx:
     api_key: ""                  # OKX → API → 创建 API Key，权限只勾“交易”，不要勾“提现”，建议绑定服务器 IP
     api_secret: ""

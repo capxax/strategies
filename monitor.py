@@ -10,7 +10,7 @@
   - Telegram 推送（同一事件每个 UTC 日只推一次）：日报、止损、盘中预警、系统异常
   - Telegram 命令：/status /pos /c BTC /alerts /help
 """
-import argparse, copy, json, os, sys, threading, time, traceback
+import argparse, copy, json, logging, os, sys, threading, time, traceback
 from datetime import datetime, timezone, timedelta
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
@@ -58,6 +58,9 @@ DEFAULTS = {'telegram': {'bot_token': '', 'chat_ids': []},
              'rebalance_threshold': 0.2,
              'min_trade_usdt': 5,
              'protective_buffer': 0.1,
+             'max_drawdown': 0.35,
+             'retry_minutes': 10,
+             'log_dir': 'logs',
              'okx': {'api_key': '', 'api_secret': '', 'passphrase': '', 'demo': False}},
  'strategy': {'s1_fast': 12,
               's1_slow': 26,
@@ -107,8 +110,32 @@ def now_utc():
     return datetime.now(timezone.utc)
 
 
+LOGGER = logging.getLogger("trend")
+
+
+def setup_logging(cfg):
+    """日志同时输出到终端和 logs/monitor.log（5MB 轮转，保留 5 个）。"""
+    from logging.handlers import RotatingFileHandler
+    d = cfg["trading"].get("log_dir") or "logs"
+    d = d if os.path.isabs(d) else os.path.join(HERE, d)
+    os.makedirs(d, exist_ok=True)
+    fmt = logging.Formatter("%(asctime)s %(levelname)s %(message)s", "%Y-%m-%d %H:%M:%S")
+    fmt.converter = time.gmtime                       # 日志时间统一用 UTC
+    LOGGER.handlers.clear()
+    for h in (logging.StreamHandler(sys.stdout),
+              RotatingFileHandler(os.path.join(d, "monitor.log"), maxBytes=5_000_000, backupCount=5, encoding="utf-8")):
+        h.setFormatter(fmt)
+        LOGGER.addHandler(h)
+    LOGGER.setLevel(logging.INFO)
+    LOGGER.propagate = False
+
+
 def log(*a):
-    print(now_utc().strftime("%Y-%m-%d %H:%M:%S"), *a, flush=True)
+    msg = " ".join(str(x) for x in a)
+    if LOGGER.handlers:
+        LOGGER.info(msg)
+    else:
+        print(now_utc().strftime("%Y-%m-%d %H:%M:%S"), msg, flush=True)
 
 
 def fp(v):
@@ -191,6 +218,7 @@ class Monitor:
         self.last_prices = None
         self.last_compute = None
         self.errors = []
+        self.trade_attempts = {}
         self.state = self._load_state()
 
     def _load_state(self):
@@ -244,12 +272,7 @@ class Monitor:
         self._daily_events(payload)
         if self.last_prices:
             self.apply_prices(self.last_prices)
-        if self.cfg["trading"].get("enabled") and not getattr(self, "readonly", False):
-            try:
-                trader.rebalance(payload, self.cfg, notify=self.tg.send, force=False)
-            except Exception as e:
-                log("自动交易失败", traceback.format_exc())
-                self.tg.send(f"❌ <b>自动交易失败</b>\n{e}")
+        self.maybe_trade()
 
     def _daily_events(self, p):
         s, coins = p["summary"], p["coins"]
@@ -339,6 +362,29 @@ class Monitor:
                 log("价格循环异常", traceback.format_exc())
             time.sleep(self.cfg["monitor"]["price_interval"])
 
+    def maybe_trade(self):
+        """每根日线调仓一次；有失败时每 retry_minutes 分钟重试，最多 3 次。"""
+        t = self.cfg["trading"]
+        if not t.get("enabled") or getattr(self, "readonly", False) or not self.payload:
+            return
+        day = self.payload["summary"]["data_date"]
+        if trader.load_state().get("data_date") == day and not t.get("dry_run", True):
+            return
+        att = self.trade_attempts.setdefault(day, {"n": 0, "last": 0.0})
+        if att["n"] >= (1 if t.get("dry_run", True) else 4):
+            return
+        if att["n"] and time.time() - att["last"] < float(t["retry_minutes"]) * 60:
+            return
+        att["n"] += 1
+        att["last"] = time.time()
+        try:
+            text, ok = trader.rebalance(self.payload, self.cfg, notify=self.tg.send, force=False)
+            if not ok and att["n"] >= 4:
+                self.tg.send(f"❌ <b>自动交易重试 3 次仍有失败</b>，今天不再重试，请检查。可手动运行 trader.py --once --live。")
+        except Exception as e:
+            log("自动交易失败", traceback.format_exc())
+            self.tg.send(f"❌ <b>自动交易失败</b>（第 {att['n']} 次）\n{e}")
+
     def maybe_update_universe(self):
         """coins.yaml 超过 universe.update_days 天就按流动性重建，并推送名单变化。"""
         u = self.cfg["universe"]
@@ -374,6 +420,8 @@ class Monitor:
                 have = self.payload["summary"]["data_date"] if self.payload else None
                 if have is None or have < expected:
                     self.recompute()
+                else:
+                    self.maybe_trade()
             except Exception:
                 log("日线计算异常", traceback.format_exc())
                 self._once("err-compute", "⚠️ <b>日线计算失败</b>，5 分钟后重试。详见服务日志。")
@@ -486,6 +534,7 @@ def main():
     ap.add_argument("--snapshot", metavar="FILE", help="计算一次，生成静态 HTML 后退出")
     args = ap.parse_args()
     cfg = load_config(args.config, required=args.config != DEFAULT_CONFIG)
+    setup_logging(cfg)
     tg = Telegram(cfg["telegram"].get("bot_token"), cfg["telegram"].get("chat_ids"))
     if args.test_telegram:
         if not tg.enabled:
@@ -502,6 +551,13 @@ def main():
         open(args.snapshot, "w", encoding="utf-8").write(render_page(mon.snapshot()))
         log("已生成", args.snapshot)
         return
+    # 单实例锁：同一目录只允许一个 monitor 运行，防止重复下单
+    import fcntl
+    lock = open(os.path.join(HERE, ".monitor.lock"), "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        sys.exit("已经有一个 monitor.py 在运行（.monitor.lock 被占用），不能重复启动。")
     if not tg.enabled:
         log("telegram 未配置，通知只打印到日志")
     threading.Thread(target=mon.daily_loop, daemon=True).start()

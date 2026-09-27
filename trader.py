@@ -27,10 +27,6 @@ STATE_FILE = os.path.join(HERE, ".trader_state.json")
 TAG = "tm"            # 保护止损单的 algoClOrdId 前缀，只撤 bot 自己挂的单
 
 
-def log(*a):
-    print(datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"), "[trader]", *a, flush=True)
-
-
 class OKXError(Exception):
     pass
 
@@ -48,8 +44,9 @@ class OKX:
         k = (key or "-1", secret or "-1", passphrase or "-1")
         self.public = PublicData.PublicAPI(flag=flag, debug=False)
         self.market = MarketData.MarketAPI(flag=flag, debug=False)
-        self.account = Account.AccountAPI(*k, False, flag, debug=False)
-        self.trade = Trade.TradeAPI(*k, False, flag, debug=False)
+        # use_server_time=True：用 OKX 服务器时间签名，本机时钟不准也不会被拒（50102）
+        self.account = Account.AccountAPI(*k, True, flag, debug=False)
+        self.trade = Trade.TradeAPI(*k, True, flag, debug=False)
 
     @property
     def has_keys(self):
@@ -114,6 +111,9 @@ class OKX:
             kw["reduceOnly"] = "true"
         return self._call(f"{inst} 下单", self.trade.place_order, **kw)[0]
 
+    def order_detail(self, inst, ord_id):
+        return self._call(f"{inst} 查询订单", self.trade.get_order, instId=inst, ordId=ord_id)[0]
+
     def pending_stops(self):
         return [a for a in self._call("读取止损单", self.trade.order_algos_list, ordType="conditional", instType="SWAP")
                 if (a.get("algoClOrdId") or "").startswith(TAG)]
@@ -168,6 +168,56 @@ def client(cfg):
     return OKX(ok.get("api_key", ""), ok.get("api_secret", ""), ok.get("passphrase", ""), bool(ok.get("demo")))
 
 
+# ---------------------------------------------------------------- 记录
+
+import csv
+import logging
+
+logger = logging.getLogger("trend")   # 与 monitor.py 共用，写入 logs/monitor.log
+
+TRADE_COLS = ["time", "data_date", "mode", "coin", "inst", "side", "reason", "sz", "est_price", "est_notional",
+              "lever", "ord_id", "state", "fill_sz", "fill_px", "fill_notional", "fee", "pnl", "error"]
+EQUITY_COLS = ["time", "data_date", "mode", "equity", "avail", "positions", "notional", "upl", "equity_peak",
+               "drawdown", "capital_used"]
+
+
+def log_dir(cfg):
+    d = cfg["trading"].get("log_dir") or "logs"
+    d = d if os.path.isabs(d) else os.path.join(HERE, d)
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _append_csv(path, cols, row):
+    new = not os.path.exists(path)
+    with open(path, "a", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
+        if new:
+            w.writeheader()
+        w.writerow(row)
+
+
+def journal_trade(cfg, row):
+    _append_csv(os.path.join(log_dir(cfg), "trades.csv"), TRADE_COLS, row)
+
+
+def journal_equity(cfg, row):
+    _append_csv(os.path.join(log_dir(cfg), "equity.csv"), EQUITY_COLS, row)
+
+
+def journal_decision(cfg, rec):
+    with open(os.path.join(log_dir(cfg), "decisions.jsonl"), "a", encoding="utf-8") as f:
+        f.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
+
+
+def log(*a):
+    msg = " ".join(str(x) for x in a)
+    if logger.handlers:
+        logger.info("[trader] " + msg)
+    else:
+        print(datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"), "[trader]", msg, flush=True)
+
+
 # ---------------------------------------------------------------- 调仓
 
 def plan(payload, cfg, ex, equity=None, positions=None, managed=None):
@@ -178,153 +228,253 @@ def plan(payload, cfg, ex, equity=None, positions=None, managed=None):
     if equity is not None:
         capital = min(capital, equity)
     positions = positions or {}
+    day = payload["summary"]["data_date"]
     by = {c["coin"]: c for c in payload["coins"]}
     pf = {p["coin"]: p for p in payload["summary"]["portfolio"]["coins"]}
-    coins = [str(c).upper() for c in (t.get("coins") or list(pf))]
-    # bot 以前建过仓、但已不在交易名单里的币（例如季度更新后被移出），也要平掉
-    for inst in managed or []:
+    # 数据异常：拉取失败、或最后一根日线不是最新（交易所数据延迟）→ 保持现有仓位，不做任何操作
+    bad = {e["coin"]: e["error"] for e in payload["summary"].get("errors", [])}
+    bad.update({k: f"数据只到 {c['date']}，不是最新的 {day}" for k, c in by.items() if c["date"] != day})
+    bad.update({k: "暂无数据" for k in payload["summary"]["portfolio"].get("missing", []) if k not in bad})
+    coins = [str(c).upper() for c in (t.get("coins") or list(pf) + [k for k in payload["summary"]["portfolio"].get("missing", [])])]
+    for inst in managed or []:                    # 以前建过仓、现在不在名单里的币（例如季度更新被移出）
         coin = inst.split("-")[0]
         if coin not in coins:
             coins.append(coin)
     rows = []
-    for coin in coins:
+    for coin in dict.fromkeys(coins):
         inst = f"{coin}-USDT-SWAP"
         c, p, i = by.get(coin), pf.get(coin), ins.get(inst)
         cur = positions.get(inst, {}).get("sz", 0.0)
-        row = {"coin": coin, "inst": inst, "cur": cur, "target": 0.0, "action": None, "note": ""}
+        row = {"coin": coin, "inst": inst, "cur": cur, "target": 0.0, "action": None, "note": "",
+               "lot": float(i["lotSz"]) if i else 0.01, "tick": float(i["tickSz"]) if i else 0.0001,
+               "ct": float(i["ctVal"]) if i else None, "price": px.get(inst)}
         rows.append(row)
         if not i or i.get("state") != "live":
             row["note"] = "OKX 没有这个 USDT 永续"
             continue
-        if not c or not p:
-            row["note"] = "已移出名单" if coin not in pf else "暂无信号数据"
-            if cur:
-                row.update(action="sell", sz=cur, reduce=True, note=row["note"] + "，平掉已有仓位")
+        if coin in bad:
+            row.update(target=cur, note=f"数据异常，保持现有仓位（{bad[coin]}）")
             continue
-        ct, lot, mn, tick = float(i["ctVal"]), float(i["lotSz"]), float(i["minSz"]), float(i["tickSz"])
-        last = px.get(inst) or c.get("live") or c["price"]
-        notional = capital * p["exposure"]
+        if not c or not p:
+            row["note"] = "已移出名单"
+            if cur:
+                row.update(action="sell", sz=cur, reason="移出名单", note="已移出名单，平掉已有仓位")
+            continue
+        ct, lot, mn = row["ct"], row["lot"], float(i["minSz"])
+        last = row["price"] or c.get("live") or c["price"]
+        # 止损或信号离场时目标一律为 0（不依赖上游的敞口计算，双重保险）
+        notional = 0.0 if (c["stopped"] or c["pos"] <= 0) else capital * p["exposure"]
         tgt = _floor(notional / (ct * last), lot) if notional > 0 else 0.0
         if notional > 0 and tgt < mn:
             row["note"] = f"目标 {notional:.1f}U 不够最小一张（{mn * ct * last:.1f}U），跳过"
             tgt = 0.0
         row.update(target=tgt, notional=notional, price=last, lev=c["lev"], stop=c.get("stop"),
-                   stopped=c["stopped"], pos=c["pos"], lot=lot, tick=tick, ct=ct)
+                   stopped=c["stopped"], pos=c["pos"], votes=c["votes"], min_sz=mn)
         diff = tgt - cur
+        thr = max(float(t["min_trade_usdt"]), float(t["rebalance_threshold"]) * notional)
         if tgt == 0 and cur > 0:
-            row.update(action="sell", sz=cur, reduce=True,
-                       note="止损离场" if c["stopped"] else ("信号离场" if c["pos"] == 0 else row["note"] or "目标为 0"))
-        elif diff > 0:
-            thr = max(float(t["min_trade_usdt"]), float(t["rebalance_threshold"]) * notional)
-            if cur == 0 or diff * ct * last >= thr:
-                row.update(action="buy", sz=_floor(diff, lot))
-        elif diff < 0:
-            thr = max(float(t["min_trade_usdt"]), float(t["rebalance_threshold"]) * notional)
-            if -diff * ct * last >= thr:
-                row.update(action="sell", sz=_floor(-diff, lot), reduce=True)
+            reason = "止损离场" if c["stopped"] else ("信号离场" if c["pos"] == 0 else "目标不足最小一张")
+            row.update(action="sell", sz=cur, reason=reason, note=reason)
+        elif diff > 0 and (cur == 0 or diff * ct * last >= thr):
+            row.update(action="buy", sz=_floor(diff, lot), reason="入场" if cur == 0 else "加仓")
+        elif diff < 0 and -diff * ct * last >= thr:
+            row.update(action="sell", sz=_floor(-diff, lot), reason="减仓")
         if row["action"] and row.get("sz", 0) <= 0:
             row["action"] = None
     return capital, rows
 
 
+def _fill(ex, inst, ord_id):
+    """查询成交结果（市价单通常 1 秒内成交）。"""
+    d = {}
+    for _ in range(5):
+        time.sleep(0.6)
+        try:
+            d = ex.order_detail(inst, ord_id)
+        except OKXError:
+            continue
+        if d.get("state") in ("filled", "canceled", "mmp_canceled"):
+            return d
+    return d
+
+
 def rebalance(payload, cfg, live=False, notify=None, force=True):
-    """执行一次调仓，返回报告文本。live=False 时按 dry_run 配置决定是否只模拟。
-    force=False 时，同一根日线只执行一次（monitor 自动调用时使用，防止重启后重复下单）。"""
+    """执行一次调仓。返回 (报告文本, 是否全部成功)。
+    live=False 时按 dry_run 配置决定是否只模拟；force=False 时同一根日线只成功执行一次。"""
     t = cfg["trading"]
     dry = (not live) and bool(t.get("dry_run", True))
     ex = client(cfg)
     st = load_state()
     day = payload["summary"]["data_date"]
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     if not force and not dry and st.get("data_date") == day:
-        return None
-    mode = "模拟盘" if ex.demo else "实盘"
-    head = f"🤖 <b>自动交易 {'（dry-run，未下单）' if dry else mode}</b>"
-    equity = positions = None
+        return None, True
+    mode = "dry" if dry else ("demo" if ex.demo else "live")
+    head = f"🤖 <b>自动交易 {'（dry-run，未下单）' if dry else ('模拟盘' if ex.demo else '实盘')}</b>"
+    equity = avail = positions = None
     pos_mode = "net_mode"
     if ex.has_keys:
         acc = ex.config()
         pos_mode = acc.get("posMode", "net_mode")
         if acc.get("acctLv") == "1":
             raise OKXError("OKX 账户模式为“简单模式”，不能交易永续。请在 OKX 设置里切换到“单币种保证金”或以上模式。")
-        equity, _ = ex.usdt_equity()
+        equity, avail = ex.usdt_equity()
         positions = ex.positions()
     elif not dry:
         raise OKXError("config.yaml 里 trading.okx 的 api_key / api_secret / passphrase 没有填写")
     ps = "long" if pos_mode == "long_short_mode" else None
     capital, rows = plan(payload, cfg, ex, equity, positions, st.get("managed"))
-    lines = [f"本金 {capital:.2f}U" + (f"（账户权益 {equity:.2f}U）" if equity is not None else "（未连接账户，按配置本金计算）")]
+
+    # 账户熔断：权益从历史最高回撤超过 max_drawdown，停止加仓（减仓、平仓照常）
+    halted = False
+    if equity is not None and not dry:
+        st["equity_peak"] = max(float(st.get("equity_peak") or 0), equity)
+        dd = 1 - equity / st["equity_peak"] if st["equity_peak"] else 0
+        if dd >= float(t["max_drawdown"]):
+            halted = True
+    lines = [f"本金 {capital:.2f}U" + (f"（账户权益 {equity:.2f}U，可用 {avail:.2f}U）" if equity is not None
+                                      else "（未连接账户，按配置本金计算）")]
+    if halted:
+        lines.append(f"⛔ 账户回撤 {dd:.0%} ≥ {float(t['max_drawdown']):.0%}，熔断：暂停加仓，只执行减仓和平仓。"
+                     "人工确认后删除 .trader_state.json 里的 equity_peak 可解除。")
     errors = []
-    # 先减仓再加仓，释放保证金
-    for row in sorted([r for r in rows if r["action"]], key=lambda r: r["action"] != "sell"):
-        sz = _fmt(row["sz"], row.get("lot", 0.01))
+    sells = [r for r in rows if r["action"] == "sell"]
+    buys = [r for r in rows if r["action"] == "buy"]
+    for r in buys if halted else []:
+        r.update(action=None, note="账户熔断，暂停加仓")
+    buys = [] if halted else buys
+
+    def execute(row):
+        sz = _fmt(row["sz"], row["lot"])
+        est = row["sz"] * row["ct"] * row["price"] if row.get("ct") and row.get("price") else None
         desc = f"{'🔻 卖出' if row['action'] == 'sell' else '🟢 买入'} {row['coin']} {sz} 张" \
-               + (f" ≈ {row['sz'] * row['ct'] * row['price']:.1f}U" if row.get("ct") else "") \
-               + (f"（{row['note']}）" if row["note"] else "")
+               + (f" ≈ {est:.1f}U" if est else "") + f"（{row.get('reason') or row['note']}）"
+        rec = {"time": now, "data_date": day, "mode": mode, "coin": row["coin"], "inst": row["inst"],
+               "side": row["action"], "reason": row.get("reason"), "sz": sz, "est_price": row.get("price"),
+               "est_notional": round(est, 4) if est else None, "lever": row.get("lev")}
         if dry:
-            lines.append(desc)
-            continue
+            journal_trade(cfg, {**rec, "state": "dry-run"})
+            return desc
         try:
             if row["action"] == "buy":
                 lev = row["lev"]
                 try:
                     ex.set_leverage(row["inst"], lev, ps)
                 except OKXError:
-                    lev = max(1, int(lev))            # 不支持小数杠杆时向下取整，保证金更充足
+                    lev = max(1, int(lev))            # 不支持小数杠杆时向下取整
                     ex.set_leverage(row["inst"], lev, ps)
-                ex.market(row["inst"], "buy", sz, pos_side=ps)
+                rec["lever"] = lev
+                res = ex.market(row["inst"], "buy", sz, pos_side=ps)
             else:
-                ex.market(row["inst"], "sell", sz, reduce_only=True, pos_side=ps)
-            lines.append(desc + " ✅")
+                res = ex.market(row["inst"], "sell", sz, reduce_only=True, pos_side=ps)
+            d = _fill(ex, row["inst"], res.get("ordId"))
+            fsz = float(d.get("accFillSz") or 0)
+            fpx = float(d.get("avgPx") or 0)
+            rec.update(ord_id=res.get("ordId"), state=d.get("state"), fill_sz=fsz, fill_px=fpx,
+                       fill_notional=round(fsz * row["ct"] * fpx, 4) if row.get("ct") else None,
+                       fee=d.get("fee"), pnl=d.get("pnl"))
+            journal_trade(cfg, rec)
+            if d.get("state") != "filled":
+                errors.append(f"{row['coin']}：订单状态 {d.get('state')}，成交 {fsz} 张")
+                return desc + f" ⚠️ {d.get('state')}"
+            return desc + f" ✅ 成交价 {fpx:g}"
         except OKXError as e:
+            journal_trade(cfg, {**rec, "state": "error", "error": str(e)})
             errors.append(f"{row['coin']}：{e}")
-            lines.append(desc + " ❌")
-    skipped = [f"{r['coin']}：{r['note']}" for r in rows if not r["action"] and r["note"]]
-    # 保护止损单
+            return desc + " ❌"
+
+    # 先减仓再加仓，释放保证金
+    for r in sells:
+        lines.append(execute(r))
+    if buys and not dry and ex.has_keys:
+        _, avail = ex.usdt_equity()                    # 卖出后刷新可用保证金
+    for r in buys:
+        if avail is not None:
+            lev_m = max(1, int(r["lev"]))            # 按取整后的杠杆估算保证金（偏保守）
+            per = r["ct"] * r["price"] / lev_m * 1.02  # 每张需要的保证金（含手续费余量）
+            need = r["sz"] * per
+            if need > avail:                          # 保证金不够：按可用资金缩小，仍不够最小一张则跳过
+                sz = _floor(avail / per, r["lot"])
+                if sz < r.get("min_sz", r["lot"]):
+                    r.update(action=None, note=f"可用保证金 {avail:.1f}U 不足（需要 {need:.1f}U），跳过")
+                    errors.append(f"{r['coin']}：{r['note']}")
+                    continue
+                r.update(sz=sz, reason=r["reason"] + "（保证金不足，已缩小）")
+                need = sz * per
+            avail -= need
+        lines.append(execute(r))
+
+    # 保护止损单：撤掉 bot 旧单，按最新持仓重新挂
     if not dry and ex.has_keys:
         time.sleep(1)
         positions = ex.positions()
+        # 需要重挂的：有持仓且有止损价的币；没有持仓的币旧单全部撤掉；
+        # 有持仓但本次没有止损价的币（例如数据异常）保留原来的保护止损单
+        renew = {r["inst"] for r in rows if r["inst"] in positions and r.get("stop")}
         try:
             old = ex.pending_stops()
-            ex.cancel_algos(old)
+            ex.cancel_algos([a for a in old if a["instId"] in renew or a["instId"] not in positions])
+            kept = {a["instId"] for a in old if a["instId"] not in renew and a["instId"] in positions}
         except OKXError as e:
             errors.append(f"撤旧止损单失败：{e}")
+            kept = set()
+        for r in rows:
+            if r["inst"] in positions and r["inst"] not in renew:
+                r["protect"] = "保留原单" if r["inst"] in kept else None
+                if r["inst"] not in kept and r["inst"] in {x["inst"] for x in rows if x["note"].startswith("数据异常")}:
+                    errors.append(f"{r['coin']}：数据异常且没有保护止损单，请手动检查")
         buf = float(t["protective_buffer"])
         for r in rows:
             p = positions.get(r["inst"])
-            if not p or not r.get("stop"):
+            if not p or r["inst"] not in renew:
                 continue
             trig = r["stop"] * (1 - buf)
             if p.get("liqPx"):
                 trig = max(trig, p["liqPx"] * 1.05)
             try:
                 ex.place_stop(r["inst"], _fmt(p["sz"], r["lot"]), _px(trig, r["tick"]), ps)
+                r["protect"] = trig
             except OKXError as e:
                 errors.append(f"{r['coin']} 保护止损单：{e}")
-        st["managed"] = sorted(r["inst"] for r in rows if r["inst"] in positions)   # 只记录 bot 名单里的币
-    held = [r for r in rows if (r["target"] or r["cur"])]
-    lines.append("")
-    lines.append("<b>目标持仓</b>")
+        st["managed"] = sorted(r["inst"] for r in rows if r["inst"] in positions)
+        eq2, av2 = ex.usdt_equity()
+        notional = sum(positions[r["inst"]]["sz"] * (r["ct"] or 0) * (r["price"] or 0)
+                       for r in rows if r["inst"] in positions)
+        journal_equity(cfg, {"time": now, "data_date": day, "mode": mode, "equity": round(eq2, 4),
+                             "avail": round(av2, 4), "positions": len(st["managed"]),
+                             "notional": round(notional, 4), "upl": round(sum(p["upl"] for p in positions.values()), 4),
+                             "equity_peak": round(st.get("equity_peak") or eq2, 4),
+                             "drawdown": round(1 - eq2 / st["equity_peak"], 4) if st.get("equity_peak") else 0,
+                             "capital_used": round(capital, 4)})
+
+    journal_decision(cfg, {"time": now, "data_date": day, "mode": mode, "capital": capital, "equity": equity,
+                           "halted": halted, "errors": errors,
+                           "rows": [{k: r.get(k) for k in ("coin", "cur", "target", "action", "sz", "reason", "note",
+                                                           "pos", "votes", "stopped", "stop", "protect", "price",
+                                                           "notional", "lev")} for r in rows]})
+    held = [r for r in rows if r["target"] > 0 and r.get("ct") and r.get("price")]
+    lines += ["", "<b>目标持仓</b>"]
     for r in held:
-        if r.get("ct"):
-            lines.append(f"{r['coin']} {_fmt(r['target'], r['lot'])} 张 ≈ {r['target'] * r['ct'] * r['price']:.1f}U"
-                         f"（{r['lev']:g}x，止损 {r['stop']:.6g}）" if r.get("stop") else
-                         f"{r['coin']} {_fmt(r['target'], r['lot'])} 张")
+        lines.append(f"{r['coin']} {_fmt(r['target'], r['lot'])} 张 ≈ {r['target'] * r['ct'] * r['price']:.1f}U"
+                     + (f"（{r['lev']:g}x，止损 {r['stop']:.6g}）" if r.get("stop") and r.get("lev") else ""))
+    skipped = [f"{r['coin']}：{r['note']}" for r in rows if not r["action"] and r["note"]]
     if skipped:
-        lines += ["", "<b>跳过</b>"] + skipped
+        lines += ["", "<b>跳过 / 保持</b>"] + skipped
     if errors:
         lines += ["", "<b>错误</b>"] + errors
-    if not any(r["action"] for r in rows):
+    if not sells and not buys:
         lines.insert(1, "今日无需调仓。")
     text = head + "\n" + "\n".join(lines)
-    st["last_run"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    st["last_run"] = now + " UTC"
     st["last_report"] = text
     if not dry:
-        st["data_date"] = day
+        if not errors:
+            st["data_date"] = day                     # 全部成功才标记完成；有错误时 monitor 会稍后重试
         save_state(st)
     log(text.replace("\n", " | "))
     if notify:
         notify(text)
-    return text
+    return text, not errors
 
 
 def status(cfg):
@@ -370,6 +520,7 @@ def main():
     ap.add_argument("--close-all", action="store_true")
     args = ap.parse_args()
     cfg = monitor.load_config(args.config, required=args.config != monitor.DEFAULT_CONFIG)
+    monitor.setup_logging(cfg)
     if args.status:
         print(status(cfg))
         return
@@ -381,7 +532,8 @@ def main():
             sys.exit("trading.enabled 为 false，拒绝真实下单。确认无误后在 config.yaml 打开它。")
         coins = monitor.load_coins()
         payload = signals.compute(cfg, coins, exchanges.resolve_sources(coins))
-        print(rebalance(payload, cfg, live=args.live).replace("<b>", "").replace("</b>", ""))
+        text, _ = rebalance(payload, cfg, live=args.live)
+        print(text.replace("<b>", "").replace("</b>", ""))
         return
     ap.print_help()
 
