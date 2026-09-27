@@ -1,7 +1,4 @@
 <title>趋势信号看板</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <style>
 :root{
   --bg:#F3F5F8; --surface:#FFFFFF; --sunk:#EDF0F4; --text:#141922; --muted:#5A6474; --faint:#8A93A1;
@@ -9,8 +6,8 @@
   --long:#1E8457; --long-soft:#DDF1E7; --part:#B7791F; --part-soft:#FBEFD9;
   --flat:#8A93A1; --flat-soft:#ECEEF2; --danger:#C2412D; --danger-soft:#FBE3DE;
   --chart-line:#141922; --chart-ema:#2F5BD3; --chart-fill:rgba(30,132,87,.13);
-  --sans:"IBM Plex Sans",system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
-  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --sans:system-ui,-apple-system,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK SC",sans-serif;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
 }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
@@ -220,7 +217,7 @@ input[type=search]{width:130px}
     <span class="count" id="count"></span>
   </div>
 
-  <main class="grid" id="grid"></main>
+  <main class="grid" id="grid"><p class="empty">正在加载数据…</p></main>
 
   <section class="legend" aria-label="说明">
     <p><b>四个信号</b>　S1 EMA12/26 交叉；S2 肯特纳 EMA20±1.5×ATR10，收盘破上轨买入、跌破中线卖出；S3 PBX 4/6/12 多头排列入场、跌破慢线离场；S4 K 线面积 &gt; 0。目标仓位 = 四个信号的平均。</p>

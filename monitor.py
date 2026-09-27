@@ -524,9 +524,17 @@ def make_handler(mon, cfg):
             pass
 
         def _send(self, code, body, ctype):
+            if len(body) > 2048 and "gzip" in (self.headers.get("Accept-Encoding") or ""):
+                import gzip
+                body, enc = gzip.compress(body, 5), "gzip"      # 数据约 400KB，压缩后约 110KB
+            else:
+                enc = None
             self.send_response(code)
             self.send_header("Content-Type", ctype)
             self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            if enc:
+                self.send_header("Content-Encoding", enc)
             self.end_headers()
             self.wfile.write(body)
 
