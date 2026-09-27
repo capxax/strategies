@@ -33,6 +33,7 @@ python monitor.py --snapshot out.html     # 计算一次，生成可离线打开
 | `config.example.yaml` | 配置模板（复制为 `config.yaml` 使用） |
 | `coins.yaml` | 监控的币种名单（流动性前 40）和历史回测 |
 | `rank_coins.py` | 按流动性重新生成 `coins.yaml` |
+| `trader.py` | OKX 自动交易 |
 | `trend-monitor.service` | systemd 服务示例 |
 
 ## 行情数据来源
@@ -112,6 +113,46 @@ SOL:
 ```
 `BTC` 必须保留（用于计算 BTC 联动和市场状态）。修改后在下一次日线重算时生效，想立即生效请重启服务。
 
+## 自动交易（OKX）
+
+`trader.py` 按“我的组合”的目标仓位在 OKX USDT 永续上自动调仓：逐仓、只做多、市价单。
+
+### 每天做什么（UTC 00:05 日线重算后，由 monitor.py 自动调用）
+1. 本金 = min(`trading.capital`, 账户 USDT 权益)。
+2. 每个币的目标名义价值 = 本金 × 组合敞口（已包含目标仓位、杠杆、强跟随组和总敞口上限），
+   换算成合约张数，按 OKX 的最小下单量和步长**向下取整**。不够最小一张的币跳过并在报告里说明。
+3. 与当前持仓比较：止损离场或目标为 0 的币全部平仓；其余差额超过目标的 20%（且 ≥ 5U）才调仓。
+4. 先减仓再加仓；加仓前按建议杠杆设置逐仓杠杆（OKX 不支持小数杠杆时向下取整）。
+5. 为每个持仓挂一张保护止损单：止损价再往下 10%。正常止损按**日线收盘价**由 bot 执行（与回测一致），
+   保护止损单只在盘中暴跌时兜底。
+6. 执行结果推送到 Telegram；同一根日线只执行一次，服务重启不会重复下单。
+
+### 上线步骤（务必按顺序）
+1. **dry-run**：`trading.enabled: true`、`dry_run: true`。每天会推送“将要下的单”，不真实下单。
+   也可以随时手动看一次：`python trader.py --once`。
+2. **OKX 模拟盘**：在 OKX 的“模拟交易”里创建 API Key，填到 `trading.okx`，设置 `demo: true`、`dry_run: false`。
+   跑几天，确认下单、止损单、Telegram 报告都正常。
+3. **小资金实盘**：换成实盘 API Key，`demo: false`，本金先用 100U。
+
+### API Key 与账户设置
+- 权限只勾**交易**，**不要勾提现**；建议绑定服务器 IP。
+- OKX 账户模式需要是“单币种保证金”或以上（“简单模式”不能交易永续，bot 会报错提示）。
+- 持仓模式“买卖模式”（net）和“开平仓模式”（long/short）都支持。
+
+### 命令
+```bash
+python trader.py --once          # 执行一次（dry_run 时只打印）
+python trader.py --once --live   # 忽略 dry_run 真实下单（仍要求 trading.enabled: true）
+python trader.py --status        # 账户权益、持仓、强平价、保护止损单
+python trader.py --close-all     # 平掉 bot 管理的全部仓位，撤掉保护止损单
+```
+Telegram 里发 `/bot` 查看账户和最近一次调仓报告。
+
+### 小资金的限制
+OKX 每个合约有最小下单量。以 100U 本金、当前价格为例：ZEC 最少一张约 16.5U、UNI 约 9.9U，
+而它们按权重只分到约 5U，所以会被跳过；BNB 最少一张约 7.8U，实际持仓会比目标偏离较多。
+本金越大，取整误差越小；500U 以上基本所有核心币都能按比例下单。
+
 ## 部署到服务器
 
 1. 用 systemd 常驻：修改 `trend-monitor.service` 里的用户和目录，然后
@@ -168,4 +209,4 @@ python rank_coins.py --dry-run    # 只看排名，不写文件
 
 - 信号和参数来自历史回测（日线、只做多），过去的表现不代表未来。
 - 建议杠杆：BTC 2x，ETH / BNB / HYPE 1.5x，其余 1x，一律逐仓；可在 `config.yaml` 的 `leverage` 中修改。
-- 本程序只做监控和提醒，不会下单。
+- 自动交易默认关闭；打开后会用你的资金真实下单，请先用 dry-run 和模拟盘验证。

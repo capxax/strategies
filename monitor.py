@@ -22,6 +22,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import exchanges  # noqa: E402
 import signals  # noqa: E402
+import trader  # noqa: E402
 
 STATE_FILE = os.path.join(HERE, ".monitor_state.json")
 COINS_FILE = os.path.join(HERE, "coins.yaml")
@@ -199,6 +200,12 @@ class Monitor:
         self._daily_events(payload)
         if self.last_prices:
             self.apply_prices(self.last_prices)
+        if self.cfg["trading"].get("enabled") and not getattr(self, "readonly", False):
+            try:
+                trader.rebalance(payload, self.cfg, notify=self.tg.send, force=False)
+            except Exception as e:
+                log("自动交易失败", traceback.format_exc())
+                self.tg.send(f"❌ <b>自动交易失败</b>\n{e}")
 
     def _daily_events(self, p):
         s, coins = p["summary"], p["coins"]
@@ -325,8 +332,17 @@ class Monitor:
         cmd, *args = text.split()
         cmd = cmd.split("@")[0].lower()
         s, coins = p["summary"], p["coins"]
+        if cmd == "/bot":
+            if not self.cfg["trading"].get("enabled"):
+                return "自动交易未启用（config.yaml 的 trading.enabled）。"
+            try:
+                acct = trader.status(self.cfg)
+            except Exception as e:
+                acct = f"读取账户失败：{e}"
+            last = trader.load_state().get("last_report") or "还没有执行过调仓。"
+            return f"<pre>{acct}</pre>\n\n<b>最近一次调仓</b>\n{last}"
         if cmd in ("/start", "/help"):
-            return ("/status 汇总\n/pos 当前持仓与止损\n/c BTC 查看单个币\n/alerts 盘中预警\n"
+            return ("/status 汇总\n/pos 当前持仓与止损\n/c BTC 查看单个币\n/alerts 盘中预警\n/bot 自动交易账户与最近一次调仓\n"
                     "仓位信号基于日线收盘，每天 UTC " + str(self.cfg["monitor"]["daily_at"]) + " 更新；盘中价格每 "
                     f"{self.cfg['monitor']['price_interval']} 秒刷新。")
         if cmd == "/status":

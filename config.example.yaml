@@ -29,10 +29,26 @@ dashboard:
 
 # 我的组合：只在这些币之间分配资金（仪表盘“我的组合”区域）
 portfolio:
-  capital: 10000                 # 总资金（U），网页上也可以临时修改
+  capital: 100                   # 网页“我的组合”默认显示的总资金（U），网页上也可以临时修改
   first_batch: 0.5               # 首批进场比例：新建仓时先下目标金额的一半，1–2 周内补齐
   gap_buffer: 0.10               # 估算最坏亏损时，在止损距离之外再加的跳空缓冲
   coins: [BTC, ETH, ZEC, SOL, XRP, NEAR, BNB, DOGE, UNI, SUI, ENA, ARB]   # 由 rank_coins.py 生成的核心名单
+
+# 自动交易（OKX USDT 永续，逐仓，只做多）
+# 建议顺序：dry_run 观察几天 → OKX 模拟盘（demo: true，用模拟盘 API key）→ 小资金实盘
+trading:
+  enabled: false                 # 总开关。false 时 monitor 不会自动交易，trader.py --live 也会拒绝下单
+  dry_run: true                  # true = 只计算并推送“将要下的单”，不真实下单
+  capital: 100                   # 交易本金（U）。实际使用 min(本金, 账户 USDT 权益)
+  coins: []                      # 交易哪些币；留空 = 使用 portfolio.coins
+  rebalance_threshold: 0.2       # 持仓与目标相差超过目标的 20% 才调仓（目标为 0 时总是平仓）
+  min_trade_usdt: 5              # 单笔调仓金额低于这个值不下单
+  protective_buffer: 0.10        # 交易所保护止损单 = 止损价再往下 10%，只防盘中暴跌
+  okx:
+    api_key: ""                  # OKX → API → 创建 API Key，权限只勾“交易”，不要勾“提现”，建议绑定服务器 IP
+    api_secret: ""
+    passphrase: ""
+    demo: false                  # true = OKX 模拟盘（需要用模拟盘里创建的 API Key）
 
 # 策略参数（与回测一致，改动后回测结果不再适用）
 strategy:
