@@ -53,13 +53,14 @@ class OKX:
         return bool(self.key and self.secret and self.passphrase)
 
     @staticmethod
-    def _call(name, fn, *a, **kw):
-        for i in range(3):
+    def _call(name, fn, *a, retries=3, **kw):
+        """retries=1 用于下单类请求：网络超时后不重发，避免重复下单。"""
+        for i in range(retries):
             try:
                 j = fn(*a, **kw)
                 break
             except Exception as e:                        # 网络错误、HTTP 错误
-                if i == 2:
+                if i == retries - 1:
                     raise OKXError(f"{name} 请求失败：{e}")
                 time.sleep(1 + i)
         if str(j.get("code")) != "0":
@@ -92,7 +93,7 @@ class OKX:
         out = {}
         for p in self._call("读取持仓", self.account.get_positions, instType="SWAP"):
             sz = float(p.get("pos") or 0)
-            if sz and p.get("mgnMode") == "isolated":
+            if sz > 0 and p.get("mgnMode") == "isolated" and p.get("posSide") in ("net", "long", None, ""):
                 out[p["instId"]] = {"sz": sz, "avgPx": float(p.get("avgPx") or 0),
                                     "lever": p.get("lever"), "posSide": p.get("posSide"),
                                     "upl": float(p.get("upl") or 0), "liqPx": float(p.get("liqPx") or 0)}
@@ -104,12 +105,24 @@ class OKX:
 
     # 交易
     def market(self, inst, side, sz, reduce_only=False, pos_side=None):
-        kw = {"instId": inst, "tdMode": "isolated", "side": side, "ordType": "market", "sz": sz}
+        """市价单。带唯一 clOrdId、不自动重发；请求失败时按 clOrdId 查询，确认是否其实已经下单成功。"""
+        cl = f"{TAG}{inst.split('-')[0]}{side[0]}{int(time.time() * 1000)}"[:32]
+        kw = {"instId": inst, "tdMode": "isolated", "side": side, "ordType": "market", "sz": sz, "clOrdId": cl}
         if pos_side:
             kw["posSide"] = pos_side
         elif reduce_only:
             kw["reduceOnly"] = "true"
-        return self._call(f"{inst} 下单", self.trade.place_order, **kw)[0]
+        try:
+            return self._call(f"{inst} 下单", self.trade.place_order, retries=1, **kw)[0]
+        except OKXError as e:
+            time.sleep(2)
+            try:                                          # 超时但订单可能已经到达交易所
+                d = self._call(f"{inst} 查询订单", self.trade.get_order, instId=inst, clOrdId=cl)[0]
+                if d.get("ordId"):
+                    return {"ordId": d["ordId"], "clOrdId": cl}
+            except OKXError:
+                pass
+            raise e
 
     def order_detail(self, inst, ord_id):
         return self._call(f"{inst} 查询订单", self.trade.get_order, instId=inst, ordId=ord_id)[0]
@@ -131,7 +144,7 @@ class OKX:
             kw["posSide"] = pos_side
         else:
             kw["reduceOnly"] = "true"
-        return self._call(f"{inst} 挂保护止损单", self.trade.place_algo_order, **kw)
+        return self._call(f"{inst} 挂保护止损单", self.trade.place_algo_order, retries=1, **kw)
 
 
 # ---------------------------------------------------------------- 工具
@@ -151,15 +164,26 @@ def _px(x, tick):
     return _fmt(_floor(x, tick), tick)
 
 
-def load_state():
+def state_file(cfg=None):
+    """模拟盘和实盘分开记录（管理的持仓、最高权益、当日是否已调仓），切换时互不影响。"""
+    if cfg is None:
+        return STATE_FILE
+    demo = bool(((cfg.get("trading") or {}).get("okx") or {}).get("demo"))
+    return STATE_FILE.replace(".json", ".demo.json" if demo else ".live.json")
+
+
+def load_state(cfg=None):
     try:
-        return json.load(open(STATE_FILE))
+        return json.load(open(state_file(cfg)))
     except Exception:
         return {"managed": [], "last_run": None, "last_report": None}
 
 
-def save_state(st):
-    json.dump(st, open(STATE_FILE, "w"), ensure_ascii=False, indent=1)
+def save_state(st, cfg=None):
+    path = state_file(cfg)
+    tmp = path + ".tmp"
+    json.dump(st, open(tmp, "w"), ensure_ascii=False, indent=1)
+    os.replace(tmp, path)                             # 原子写入，避免写到一半断电损坏
 
 
 def client(cfg):
@@ -231,11 +255,16 @@ def plan(payload, cfg, ex, equity=None, positions=None, managed=None):
     day = payload["summary"]["data_date"]
     by = {c["coin"]: c for c in payload["coins"]}
     pf = {p["coin"]: p for p in payload["summary"]["portfolio"]["coins"]}
+    if t.get("coins"):                            # 单独指定交易币种时，在这些币之间重新分配资金
+        import signals
+        cards = [by[k] for k in (str(x).upper() for x in t["coins"]) if k in by]
+        pf = {k: {"coin": k, "weight": w, "exposure": e} for k, (w, e) in signals.allocate(cards, cfg["risk"]).items()}
     # 数据异常：拉取失败、或最后一根日线不是最新（交易所数据延迟）→ 保持现有仓位，不做任何操作
     bad = {e["coin"]: e["error"] for e in payload["summary"].get("errors", [])}
     bad.update({k: f"数据只到 {c['date']}，不是最新的 {day}" for k, c in by.items() if c["date"] != day})
     bad.update({k: "暂无数据" for k in payload["summary"]["portfolio"].get("missing", []) if k not in bad})
-    coins = [str(c).upper() for c in (t.get("coins") or list(pf) + [k for k in payload["summary"]["portfolio"].get("missing", [])])]
+    coins = [str(c).upper() for c in t["coins"]] if t.get("coins") else \
+        list(pf) + list(payload["summary"]["portfolio"].get("missing", []))
     for inst in managed or []:                    # 以前建过仓、现在不在名单里的币（例如季度更新被移出）
         coin = inst.split("-")[0]
         if coin not in coins:
@@ -304,7 +333,7 @@ def rebalance(payload, cfg, live=False, notify=None, force=True):
     t = cfg["trading"]
     dry = (not live) and bool(t.get("dry_run", True))
     ex = client(cfg)
-    st = load_state()
+    st = load_state(cfg)
     day = payload["summary"]["data_date"]
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     if not force and not dry and st.get("data_date") == day:
@@ -336,8 +365,9 @@ def rebalance(payload, cfg, live=False, notify=None, force=True):
                                       else "（未连接账户，按配置本金计算）")]
     if halted:
         lines.append(f"⛔ 账户回撤 {dd:.0%} ≥ {float(t['max_drawdown']):.0%}，熔断：暂停加仓，只执行减仓和平仓。"
-                     "人工确认后删除 .trader_state.json 里的 equity_peak 可解除。")
-    errors = []
+                     f"人工确认后删除 {os.path.basename(state_file(cfg))} 里的 equity_peak 可解除。")
+    errors = []      # 需要重试 / 人工处理
+    warnings = []    # 正常跳过，只提示
     sells = [r for r in rows if r["action"] == "sell"]
     buys = [r for r in rows if r["action"] == "buy"]
     for r in buys if halted else []:
@@ -399,7 +429,7 @@ def rebalance(payload, cfg, live=False, notify=None, force=True):
                 sz = _floor(avail / per, r["lot"])
                 if sz < r.get("min_sz", r["lot"]):
                     r.update(action=None, note=f"可用保证金 {avail:.1f}U 不足（需要 {need:.1f}U），跳过")
-                    errors.append(f"{r['coin']}：{r['note']}")
+                    warnings.append(f"{r['coin']}：{r['note']}")
                     continue
                 r.update(sz=sz, reason=r["reason"] + "（保证金不足，已缩小）")
                 need = sz * per
@@ -433,6 +463,10 @@ def rebalance(payload, cfg, live=False, notify=None, force=True):
             trig = r["stop"] * (1 - buf)
             if p.get("liqPx"):
                 trig = max(trig, p["liqPx"] * 1.05)
+            if r.get("price") and trig >= r["price"] * 0.995:
+                warnings.append(f"{r['coin']}：现价 {r['price']:g} 已低于保护止损价 {trig:.6g}，无法挂单；"
+                                "收盘若跌破止损价会在下次调仓时平仓")
+                continue
             try:
                 ex.place_stop(r["inst"], _fmt(p["sz"], r["lot"]), _px(trig, r["tick"]), ps)
                 r["protect"] = trig
@@ -450,7 +484,7 @@ def rebalance(payload, cfg, live=False, notify=None, force=True):
                              "capital_used": round(capital, 4)})
 
     journal_decision(cfg, {"time": now, "data_date": day, "mode": mode, "capital": capital, "equity": equity,
-                           "halted": halted, "errors": errors,
+                           "halted": halted, "errors": errors, "warnings": warnings,
                            "rows": [{k: r.get(k) for k in ("coin", "cur", "target", "action", "sz", "reason", "note",
                                                            "pos", "votes", "stopped", "stop", "protect", "price",
                                                            "notional", "lev")} for r in rows]})
@@ -462,6 +496,8 @@ def rebalance(payload, cfg, live=False, notify=None, force=True):
     skipped = [f"{r['coin']}：{r['note']}" for r in rows if not r["action"] and r["note"]]
     if skipped:
         lines += ["", "<b>跳过 / 保持</b>"] + skipped
+    if warnings:
+        lines += ["", "<b>提示</b>"] + warnings
     if errors:
         lines += ["", "<b>错误</b>"] + errors
     if not sells and not buys:
@@ -472,7 +508,7 @@ def rebalance(payload, cfg, live=False, notify=None, force=True):
     if not dry:
         if not errors:
             st["data_date"] = day                     # 全部成功才标记完成；有错误时 monitor 会稍后重试
-        save_state(st)
+        save_state(st, cfg)
     log(text.replace("\n", " | "))
     if notify:
         notify(text)
@@ -498,7 +534,7 @@ def status(cfg):
 
 def close_all(cfg):
     ex = client(cfg)
-    st = load_state()
+    st = load_state(cfg)
     pos = ex.positions()
     ps = "long" if ex.config().get("posMode") == "long_short_mode" else None
     ex.cancel_algos(ex.pending_stops())
@@ -508,7 +544,7 @@ def close_all(cfg):
             ex.market(inst, "sell", str(pos[inst]["sz"]), reduce_only=True, pos_side=ps)
             out.append(inst)
     st["managed"] = []
-    save_state(st)
+    save_state(st, cfg)
     return "已平仓：" + (", ".join(out) if out else "无")
 
 

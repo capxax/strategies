@@ -89,6 +89,9 @@ def load_config(path, required=False):
         except yaml.YAMLError as e:
             sys.exit(f"配置文件 {found} 格式错误：{e}")
         log(f"使用配置文件 {found}")
+        ok_ = (cfg.get("trading") or {}).get("okx") or {}
+        if ok_.get("api_secret") and os.name == "posix" and os.stat(found).st_mode & 0o077:
+            log(f"⚠️ 配置文件里有 OKX 密钥，但 {found} 其他用户可读。建议执行：chmod 600 {found}")
     elif required:
         sys.exit(f"找不到配置文件 {path}（查找过：{'、'.join(cands)}）")
     else:
@@ -167,6 +170,10 @@ class Telegram:
         self.enabled = bool(self.token and self.chats)
         self.offset = None
 
+    def _clean(self, x):
+        """日志里去掉 bot token（requests 的异常信息会带上完整 URL）。"""
+        return str(x).replace(self.token, "***") if self.token else str(x)
+
     def send(self, text, chat=None):
         if not self.enabled:
             log("[TG 未配置]", text.replace("\n", " | ")[:300])
@@ -178,9 +185,9 @@ class Telegram:
                                       json={"chat_id": cid, "text": part, "parse_mode": "HTML",
                                             "disable_web_page_preview": True})
                     if r.status_code != 200:
-                        log("TG 发送失败", r.status_code, r.text[:200])
+                        log("TG 发送失败", r.status_code, self._clean(r.text[:200]))
                 except requests.RequestException as e:
-                    log("TG 发送异常", e)
+                    log("TG 发送异常", self._clean(e))
 
     def poll(self, handler):
         """长轮询接收命令，只响应配置里的 chat。"""
@@ -201,7 +208,7 @@ class Telegram:
                         except Exception as e:
                             self.send(f"命令出错：{e}", chat=cid)
             except Exception as e:
-                log("TG 轮询异常", e)
+                log("TG 轮询异常", self._clean(e))
                 time.sleep(5)
 
 
@@ -368,7 +375,9 @@ class Monitor:
         if not t.get("enabled") or getattr(self, "readonly", False) or not self.payload:
             return
         day = self.payload["summary"]["data_date"]
-        if trader.load_state().get("data_date") == day and not t.get("dry_run", True):
+        if day < self.expected_date():                 # 交易所数据还没更新到最新日线，不用旧数据交易
+            return
+        if trader.load_state(self.cfg).get("data_date") == day and not t.get("dry_run", True):
             return
         att = self.trade_attempts.setdefault(day, {"n": 0, "last": 0.0})
         if att["n"] >= (1 if t.get("dry_run", True) else 4):
@@ -405,8 +414,15 @@ class Monitor:
                      + ("\n\n自动交易会在下一次调仓时平掉移出名单的币。" if self.cfg["trading"].get("enabled") else ""))
         self.payload = None                            # 触发用新名单重算
 
-    def daily_loop(self):
+    def expected_date(self):
+        """当前时刻应该已经有的最新日线日期（过了 daily_at 就是昨天）。"""
         hh, mm = map(int, str(self.cfg["monitor"]["daily_at"]).split(":"))
+        n = now_utc()
+        target = n.replace(hour=hh, minute=mm, second=0, microsecond=0)
+        return (n - timedelta(days=1 if n >= target else 2)).strftime("%Y-%m-%d")
+
+    def daily_loop(self):
+        next_try = 0.0
         while True:
             try:
                 try:
@@ -414,13 +430,17 @@ class Monitor:
                 except Exception:
                     log("名单更新失败", traceback.format_exc())
                     self._once("err-universe", "⚠️ <b>候选名单自动更新失败</b>，继续使用旧名单。详见服务日志。")
-                n = now_utc()
-                target = n.replace(hour=hh, minute=mm, second=0, microsecond=0)
-                expected = (n - timedelta(days=1 if n >= target else 2)).strftime("%Y-%m-%d")
+                expected = self.expected_date()
                 have = self.payload["summary"]["data_date"] if self.payload else None
-                if have is None or have < expected:
+                if (have is None or have < expected) and time.time() >= next_try:
                     self.recompute()
-                else:
+                    have = self.payload["summary"]["data_date"]
+                    if have < expected:                # 交易所日线还没更新：5 分钟后再试，期间不交易
+                        log(f"日线数据只到 {have}，交易所还没有 {expected} 的数据，5 分钟后重试")
+                        next_try = time.time() + 300
+                        if now_utc().hour >= 2:
+                            self._once(f"stale-{expected}", f"⚠️ <b>日线数据延迟</b>：UTC 02:00 仍只有 {have} 的数据，今天暂停调仓。")
+                elif have and have >= expected:
                     self.maybe_trade()
             except Exception:
                 log("日线计算异常", traceback.format_exc())
@@ -456,7 +476,7 @@ class Monitor:
                 acct = trader.status(self.cfg)
             except Exception as e:
                 acct = f"读取账户失败：{e}"
-            last = trader.load_state().get("last_report") or "还没有执行过调仓。"
+            last = trader.load_state(self.cfg).get("last_report") or "还没有执行过调仓。"
             return f"<pre>{acct}</pre>\n\n<b>最近一次调仓</b>\n{last}"
         if cmd in ("/start", "/help"):
             return ("/status 汇总\n/pos 当前持仓与止损\n/c BTC 查看单个币\n/alerts 盘中预警\n/bot 自动交易账户与最近一次调仓\n"
@@ -564,6 +584,8 @@ def main():
     threading.Thread(target=mon.price_loop, daemon=True).start()
     threading.Thread(target=tg.poll, args=(mon.command,), daemon=True).start()
     host, port = cfg["server"]["host"], int(cfg["server"]["port"])
+    if host not in ("127.0.0.1", "localhost", "::1") and not cfg["server"].get("access_token"):
+        log(f"⚠️ 仪表盘监听 {host}，任何人都能访问持仓信息。建议设置 server.access_token 或改回 127.0.0.1")
     srv = ThreadingHTTPServer((host, port), make_handler(mon, cfg))
     tok = cfg["server"].get("access_token")
     log(f"仪表盘：http://{host}:{port}/" + (f"?token={tok}" if tok else ""))

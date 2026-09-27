@@ -1,7 +1,8 @@
 *.pyc
+.monitor.lock
 .monitor_state.json
+.trader_state*.json
 .trader_state.json
 __pycache__/
 config.yaml
 logs/
-.monitor.lock
