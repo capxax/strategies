@@ -136,16 +136,24 @@ def coin_card(row, btc_ret, btc_pos):
     }
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--universe", default=os.path.join(BT, "results", "universe.csv"))
-    ap.add_argument("--out", default=os.path.join(HERE, "index.html"))
-    ap.add_argument("--json", default=None)
-    ap.add_argument("--fragment", default=None, help="另存一份不带 <html> 外壳的页面（用于嵌入/发布）")
-    args = ap.parse_args()
+def render(payload):
+    """把数据嵌入页面模板，返回不带 <html> 外壳的页面片段。payload 为 None 时页面从 /api/data 拉取。"""
+    tpl = open(os.path.join(HERE, "template.html"), encoding="utf-8").read()
+    data_js = "null" if payload is None else json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    return tpl.replace("/*__DATA__*/null", data_js)
+
+
+def wrap(html):
+    return ('<!doctype html>\n<html lang="zh-CN">\n<head>\n<meta charset="utf-8">\n'
+            '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n'
+            '</head>\n<body style="margin:0">\n' + html + '\n</body>\n</html>\n')
+
+
+def compute(universe_path=os.path.join(BT, "results", "universe.csv")):
+    """计算全部币种的日线信号，返回 {"summary", "coins"}。"""
     data.CACHE = os.path.join(tempfile.gettempdir(), "dash_cache")   # 实时数据不污染回测缓存
 
-    u = pd.read_csv(args.universe)
+    u = pd.read_csv(universe_path)
     u = u[u.grade.str[0].isin(["A", "B", "C"])]
     btc = fetch("binance", "BTCUSDT")
     btc_ret = btc.close.pct_change()
@@ -192,16 +200,25 @@ def main():
         "exposure": sum(c["exposure"] for c in ok),
         "errors": [c for c in cards if "error" in c],
     }
-    payload = {"summary": summary, "coins": ok}
+    return {"summary": summary, "coins": ok}
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--universe", default=os.path.join(BT, "results", "universe.csv"))
+    ap.add_argument("--out", default=os.path.join(HERE, "index.html"))
+    ap.add_argument("--json", default=None)
+    ap.add_argument("--fragment", default=None, help="另存一份不带 <html> 外壳的页面（用于嵌入/发布）")
+    args = ap.parse_args()
+    payload = compute(args.universe)
+    summary = payload["summary"]
+    ok = payload["coins"]
     if args.json:
         json.dump(payload, open(args.json, "w"), ensure_ascii=False)
-    tpl = open(os.path.join(HERE, "template.html"), encoding="utf-8").read()
-    html = tpl.replace("/*__DATA__*/null", json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+    html = render(payload)
     if args.fragment:
         open(args.fragment, "w", encoding="utf-8").write(html)
-    page = ('<!doctype html>\n<html lang="zh-CN">\n<head>\n<meta charset="utf-8">\n'
-            '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n'
-            '</head>\n<body style="margin:0">\n' + html + '\n</body>\n</html>\n')
+    page = wrap(html)
     open(args.out, "w", encoding="utf-8").write(page)
     print(f"{args.out}: {len(ok)} coins, {summary['long']} long, errors={len(summary['errors'])}")
 

@@ -64,9 +64,9 @@ select,input[type=search]{font:inherit;font-size:13px;color:var(--text);backgrou
 input[type=search]{width:130px}
 .count{font-size:12px;color:var(--faint);margin-left:auto}
 
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(380px,1fr));gap:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,460px),1fr));gap:14px}
 @media (max-width:440px){.grid{grid-template-columns:1fr}}
-.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column;overflow:hidden;scroll-margin-top:70px}
+.card{container-type:inline-size;background:var(--surface);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column;overflow:hidden;scroll-margin-top:70px}
 .card.flash{outline:2px solid var(--accent)}
 .band{height:4px;background:var(--flat)}
 .card[data-state="full"] .band{background:var(--long)}
@@ -99,13 +99,22 @@ input[type=search]{width:130px}
 .chart text{font-family:var(--mono);font-size:9.5px;fill:var(--faint)}
 
 .body{display:grid;grid-template-columns:1fr 1fr;gap:0 22px;padding:8px 16px 14px}
-@media (max-width:440px){.body{grid-template-columns:1fr}}
+@container (max-width:520px){.body{grid-template-columns:1fr}}
 .kv{display:flex;flex-direction:column}
 .kv h3{font-size:11px;font-weight:600;color:var(--faint);text-transform:uppercase;letter-spacing:.06em;margin:8px 0 4px}
 .kv dl{margin:0;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 10px;font-size:12.5px}
 .kv dt{color:var(--muted)}
 .kv dd{margin:0;text-align:right;white-space:nowrap}
 .risk-dd{color:var(--danger);font-weight:600}
+.live-chg{font-size:12px;margin-left:6px}
+.closepx{font-size:11.5px;color:var(--faint)}
+.liveflags{display:flex;flex-wrap:wrap;gap:6px;padding:0 16px 12px}
+.lf{font-size:12px;padding:3px 9px;border-radius:6px;background:var(--sunk)}
+.lf.stop_break,.lf.near_stop{background:var(--danger-soft);color:var(--danger)}
+.lf.entry_watch{background:var(--long-soft);color:var(--long)}
+.lf.exit_watch{background:var(--part-soft);color:var(--part)}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--long);margin-right:6px;vertical-align:middle}
+.dot.bad{background:var(--danger)}
 .foot{border-top:1px solid var(--line);padding:9px 16px;font-size:12px;color:var(--muted);display:flex;flex-wrap:wrap;gap:4px 14px;background:var(--sunk)}
 .foot .flip b{color:var(--text)}
 
@@ -179,7 +188,7 @@ input[type=search]{width:130px}
 </div>
 
 <script>
-const DATA = /*__DATA__*/null;
+let DATA = /*__DATA__*/null;
 const $ = s => document.querySelector(s);
 const fmtP = v => v == null ? "—" : (v >= 1000 ? v.toLocaleString("en-US",{maximumFractionDigits:0}) : v >= 1 ? v.toFixed(v >= 100 ? 1 : 3) : v.toPrecision(4));
 const pc = (v, d=1) => v == null ? "—" : (v > 0 ? "+" : "") + (v*100).toFixed(d) + "%";
@@ -189,7 +198,7 @@ const stateOf = c => c.pos >= 1 ? "full" : c.pos > 0 ? "part" : "flat";
 const stateTxt = {full:"满仓", part:"部分仓位", flat:"空仓"};
 const bucket = c => c.btc.corr365 == null ? "weak" : c.btc.corr365 >= .7 ? "strong" : c.btc.corr365 >= .5 ? "mid" : "weak";
 const bucketTxt = {strong:"强跟随", mid:"中等", weak:"弱"};
-const risky = c => c.stopped || (c.stop_dist != null && c.stop_dist > -.08);
+const risky = c => { const d = c.live_stop_dist ?? c.stop_dist; return c.stopped || (d != null && d > -.08); };
 
 function spark(c){
   const W = 360, H = 110, L = 4, R = 44, T = 8, B = 16;
@@ -232,7 +241,8 @@ function card(c){
         <div class="venue">${venue}<br>K 线：${c.src} ${c.sym}</div>
       </div>
       <div class="px">
-        <div class="p num">${fmtP(c.price)}</div>
+        <div class="p num">${fmtP(c.live ?? c.price)}${c.live != null ? `<span class="live-chg ${cls(c.live_chg)}">${pc(c.live_chg)}</span>` : ""}</div>
+        ${c.live != null ? `<div class="closepx num">收盘 ${fmtP(c.price)}</div>` : ""}
         <div class="chg num"><span class="${cls(c.chg1)}">1d ${pc(c.chg1)}</span><span class="${cls(c.chg7)}">7d ${pc(c.chg7)}</span><span class="${cls(c.chg30)}">30d ${pc(c.chg30)}</span></div>
       </div>
     </div>
@@ -249,7 +259,7 @@ function card(c){
           <dt>建议权重 / 敞口</dt><dd class="num">${pp(c.weight,1)} / ${pp(c.exposure,1)}</dd>
           <dt>持仓天数</dt><dd class="num">${c.days_in ? c.days_in + " 天" : "—"}</dd>
           <dt>入场价 / 最高收盘</dt><dd class="num">${fmtP(c.entry)} / ${fmtP(c.peak)}</dd>
-          <dt>止损价</dt><dd class="num ${risky(c) ? "risk-dd" : ""}">${c.stopped ? "已触发 " : ""}${fmtP(c.stop)}${c.stop_dist != null && !c.stopped ? " (" + pc(c.stop_dist) + ")" : ""}</dd>
+          <dt>止损价</dt><dd class="num ${risky(c) ? "risk-dd" : ""}">${c.stopped ? "已触发 " : ""}${fmtP(c.stop)}${(c.live_stop_dist ?? c.stop_dist) != null && !c.stopped ? " (" + pc(c.live_stop_dist ?? c.stop_dist) + ")" : ""}</dd>
         </dl>
         <h3>关键价位</h3>
         <dl>
@@ -276,6 +286,7 @@ function card(c){
         </dl>
       </div>
     </div>
+    ${(c.live_flags || []).length ? `<div class="liveflags">${c.live_flags.map(f => `<span class="lf ${f.k}">盘中 · ${f.t}</span>`).join("")}</div>` : ""}
     <div class="foot">${flips}</div>
   </article>`;
 }
@@ -310,10 +321,11 @@ function setupSeg(id, key){
   });
 }
 
-function init(){
+function refresh(){
   const S = DATA.summary, cs = DATA.coins;
   $("#sub").textContent = `OKX + Hyperliquid 永续 · A/B/C 级 ${S.n} 个币 · 日线信号，UTC 00:00 收盘后更新`;
-  $("#gen").innerHTML = `数据截至 <span class="num">${S.data_date}</span> 收盘 · 生成于 <span class="num">${S.generated}</span>`;
+  const live = S.live_at ? `<span class="dot${S.server && S.server.errors && S.server.errors.length ? " bad" : ""}"></span>实时价 <span class="num">${S.live_at.slice(11)}</span> · ` : "";
+  $("#gen").innerHTML = `${live}日线截至 <span class="num">${S.data_date}</span> 收盘` + (S.server ? ` · Telegram ${S.server.tg ? "已连接" : "未配置"}` : ` · 生成于 <span class="num">${S.generated}</span>`);
   const btcSt = S.btc_pos >= 1 ? "满仓（上升趋势）" : S.btc_pos > 0 ? "部分仓位" : "空仓（下降或震荡）";
   const trad = cs.filter(c => c.grade !== "C");
   const breadth = trad.filter(c => c.pos >= .5).length / trad.length;
@@ -328,6 +340,7 @@ function init(){
 
   const al = [];
   cs.forEach(c => {
+    (c.live_flags || []).forEach(f => al.push({c, t: f.k === "entry_watch" ? "buy" : f.k === "exit_watch" ? "sell" : "risk", txt:`<b>${c.coin}</b> 盘中 ${f.t}`}));
     if (c.pos > c.pos_prev) al.push({c, t:"buy", txt:`<b>${c.coin}</b> 加仓 ${pp(c.pos_prev)}→${pp(c.pos)}`});
     if (c.pos < c.pos_prev) al.push({c, t:"sell", txt:`<b>${c.coin}</b> 减仓 ${pp(c.pos_prev)}→${pp(c.pos)}`});
     if (c.stopped) al.push({c, t:"risk", txt:`<b>${c.coin}</b> 已跌破止损，应空仓`});
@@ -335,6 +348,10 @@ function init(){
   });
   $("#alerts").innerHTML = al.length ? al.map((a,i) => `<button type="button" class="alert ${a.t}" data-coin="${a.c.coin}">${a.txt}</button>`).join("")
     : `<span class="empty">今天没有仓位变化，也没有接近止损的持仓。</span>`;
+  render();
+}
+
+function setup(){
   $("#alerts").addEventListener("click", e => {
     const b = e.target.closest(".alert"); if (!b) return;
     F.grade = "all"; F.state = "all"; F.btc = "all"; F.q = "";
@@ -350,7 +367,18 @@ function init(){
   $("#f-btc").addEventListener("change", e => { F.btc = e.target.value; render(); });
   $("#f-sort").addEventListener("change", e => { F.sort = e.target.value; render(); });
   $("#f-q").addEventListener("input", e => { F.q = e.target.value; render(); });
-  render();
 }
-init();
+
+// 数据已内嵌（静态快照）时直接渲染；否则从监控服务拉取并定时刷新
+async function pull(){
+  try {
+    const r = await fetch("api/data" + location.search, {cache: "no-store"});
+    if (r.ok) { DATA = await r.json(); refresh(); return true; }
+    $("#gen").textContent = r.status === 503 ? "日线信号计算中，约 1–2 分钟…" : `服务返回 ${r.status}`;
+  } catch (e) { $("#gen").textContent = "连接监控服务失败，稍后自动重试"; }
+  return false;
+}
+setup();
+if (DATA) refresh();
+else { pull(); setInterval(pull, 15000); }
 </script>
