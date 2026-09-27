@@ -210,7 +210,12 @@ def compute(cfg, coins, sources):
         c["weight"], c["exposure"] = w, e
     # 我的组合：只在精选币种之间重新分配
     pcfg = cfg.get("portfolio", {}) or {}
-    picks = [str(x).upper() for x in pcfg.get("coins", [])]
+    pc = pcfg.get("coins", "auto")
+    if not pc or pc == "auto":                         # 跟随 coins.yaml 的核心币，按流动性排名
+        picks = sorted([k for k, v in coins.items() if v.get("grade") == "A"],
+                       key=lambda k: coins[k].get("liq_rank") or 999)
+    else:
+        picks = [str(x).upper() for x in pc]
     by = {c["coin"]: c for c in ok}
     chosen = [by[k] for k in picks if k in by and by[k]["grade"] in ("A", "B")]
     alloc = allocate(chosen, cfg["risk"])

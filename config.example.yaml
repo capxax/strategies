@@ -27,12 +27,20 @@ dashboard:
   chart_days: 180                # 页面走势图显示的天数
   refresh_seconds: 15            # 网页自动刷新间隔
 
+# 候选名单：按币安 30 天成交额排名，monitor.py 每隔 update_days 天自动重建 coins.yaml
+universe:
+  auto_update: true              # 自动按季度更新名单
+  update_days: 90                # 名单超过多少天重建一次（90 = 每季度）
+  top: 40                        # 名单总数
+  core: 12                       # 前几名为核心
+  min_days: 365                  # 至少多少天历史
+
 # 我的组合：只在这些币之间分配资金（仪表盘“我的组合”区域）
 portfolio:
   capital: 100                   # 网页“我的组合”默认显示的总资金（U），网页上也可以临时修改
   first_batch: 0.5               # 首批进场比例：新建仓时先下目标金额的一半，1–2 周内补齐
   gap_buffer: 0.10               # 估算最坏亏损时，在止损距离之外再加的跳空缓冲
-  coins: [BTC, ETH, ZEC, SOL, XRP, NEAR, BNB, DOGE, UNI, SUI, ENA, ARB]   # 由 rank_coins.py 生成的核心名单
+  coins: auto                    # auto = 跟随 coins.yaml 里的核心币（名单更新后自动变化）；也可以写成列表 [BTC, ETH, ...]
 
 # 自动交易（OKX USDT 永续，逐仓，只做多）
 # 建议顺序：dry_run 观察几天 → OKX 模拟盘（demo: true，用模拟盘 API key）→ 小资金实盘
@@ -40,7 +48,7 @@ trading:
   enabled: false                 # 总开关。false 时 monitor 不会自动交易，trader.py --live 也会拒绝下单
   dry_run: true                  # true = 只计算并推送“将要下的单”，不真实下单
   capital: 100                   # 交易本金（U）。实际使用 min(本金, 账户 USDT 权益)
-  coins: []                      # 交易哪些币；留空 = 使用 portfolio.coins
+  coins: []                      # 交易哪些币；留空 = 与“我的组合”相同
   rebalance_threshold: 0.2       # 持仓与目标相差超过目标的 20% 才调仓（目标为 0 时总是平仓）
   min_trade_usdt: 5              # 单笔调仓金额低于这个值不下单
   protective_buffer: 0.10        # 交易所保护止损单 = 止损价再往下 10%，只防盘中暴跌

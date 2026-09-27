@@ -16,11 +16,10 @@ monitor.py 在 trading.enabled 为 true 时，每天日线重算后自动调用�
   5. 每个持仓挂一张保护止损单（止损价再往下 protective_buffer），只防盘中暴跌；
      正常止损按日线收盘价由 bot 执行（与回测一致）
 """
-import argparse, base64, hashlib, hmac, json, os, sys, time
+import argparse, json, os, sys, time
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_DOWN
 
-import requests
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -37,61 +36,56 @@ class OKXError(Exception):
 
 
 class OKX:
-    BASE = "https://www.okx.com"
+    """OKX 官方 SDK（python-okx）的薄封装：统一检查返回码，出错抛 OKXError。"""
 
     def __init__(self, key, secret, passphrase, demo=False):
+        import okx.Account as Account
+        import okx.MarketData as MarketData
+        import okx.PublicData as PublicData
+        import okx.Trade as Trade
         self.key, self.secret, self.passphrase, self.demo = key, secret, passphrase, demo
-        self.s = requests.Session()
+        flag = "1" if demo else "0"                       # 1 = 模拟盘，0 = 实盘
+        k = (key or "-1", secret or "-1", passphrase or "-1")
+        self.public = PublicData.PublicAPI(flag=flag, debug=False)
+        self.market = MarketData.MarketAPI(flag=flag, debug=False)
+        self.account = Account.AccountAPI(*k, False, flag, debug=False)
+        self.trade = Trade.TradeAPI(*k, False, flag, debug=False)
 
     @property
     def has_keys(self):
         return bool(self.key and self.secret and self.passphrase)
 
-    def req(self, method, path, params=None, body=None, auth=True):
-        if params:
-            path = path + "?" + "&".join(f"{k}={v}" for k, v in params.items() if v is not None)
-        data = json.dumps(body) if body is not None else ""
-        headers = {"Content-Type": "application/json"}
-        if auth:
-            ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.") + \
-                f"{datetime.now(timezone.utc).microsecond // 1000:03d}Z"
-            sign = base64.b64encode(hmac.new(self.secret.encode(), (ts + method + path + data).encode(),
-                                             hashlib.sha256).digest()).decode()
-            headers.update({"OK-ACCESS-KEY": self.key, "OK-ACCESS-SIGN": sign,
-                            "OK-ACCESS-TIMESTAMP": ts, "OK-ACCESS-PASSPHRASE": self.passphrase})
-        if self.demo:
-            headers["x-simulated-trading"] = "1"
+    @staticmethod
+    def _call(name, fn, *a, **kw):
         for i in range(3):
             try:
-                r = self.s.request(method, self.BASE + path, data=data or None, headers=headers, timeout=15)
-                j = r.json()
+                j = fn(*a, **kw)
                 break
-            except (requests.RequestException, ValueError) as e:
+            except Exception as e:                        # 网络错误、HTTP 错误
                 if i == 2:
-                    raise OKXError(f"{method} {path} 网络错误：{e}")
+                    raise OKXError(f"{name} 请求失败：{e}")
                 time.sleep(1 + i)
-        if j.get("code") != "0":
+        if str(j.get("code")) != "0":
             detail = ""
             if isinstance(j.get("data"), list) and j["data"] and isinstance(j["data"][0], dict):
                 detail = j["data"][0].get("sMsg") or ""
-            raise OKXError(f"{path} 失败：{j.get('code')} {j.get('msg')} {detail}".strip())
+            raise OKXError(f"{name} 失败：{j.get('code')} {j.get('msg')} {detail}".strip())
         return j["data"]
 
-    # 公共
+    # 公共行情
     def instruments(self):
-        return {i["instId"]: i for i in self.req("GET", "/api/v5/public/instruments",
-                                                 {"instType": "SWAP"}, auth=False)}
+        return {i["instId"]: i for i in self._call("获取合约信息", self.public.get_instruments, instType="SWAP")}
 
     def tickers(self):
-        return {x["instId"]: float(x["last"]) for x in self.req("GET", "/api/v5/market/tickers",
-                                                               {"instType": "SWAP"}, auth=False)}
+        return {x["instId"]: float(x["last"]) for x in self._call("获取行情", self.market.get_tickers, instType="SWAP")
+                if x.get("last")}
 
     # 账户
     def config(self):
-        return self.req("GET", "/api/v5/account/config")[0]
+        return self._call("读取账户配置", self.account.get_account_config)[0]
 
     def usdt_equity(self):
-        d = self.req("GET", "/api/v5/account/balance", {"ccy": "USDT"})[0]
+        d = self._call("读取余额", self.account.get_account_balance, ccy="USDT")[0]
         for x in d.get("details", []):
             if x["ccy"] == "USDT":
                 return float(x.get("eq") or 0), float(x.get("availEq") or x.get("availBal") or 0)
@@ -99,7 +93,7 @@ class OKX:
 
     def positions(self):
         out = {}
-        for p in self.req("GET", "/api/v5/account/positions", {"instType": "SWAP"}):
+        for p in self._call("读取持仓", self.account.get_positions, instType="SWAP"):
             sz = float(p.get("pos") or 0)
             if sz and p.get("mgnMode") == "isolated":
                 out[p["instId"]] = {"sz": sz, "avgPx": float(p.get("avgPx") or 0),
@@ -108,38 +102,36 @@ class OKX:
         return out
 
     def set_leverage(self, inst, lever, pos_side=None):
-        body = {"instId": inst, "lever": str(lever), "mgnMode": "isolated"}
-        if pos_side:
-            body["posSide"] = pos_side
-        return self.req("POST", "/api/v5/account/set-leverage", body=body)
+        return self._call(f"{inst} 设置杠杆", self.account.set_leverage, lever=str(lever), mgnMode="isolated",
+                          instId=inst, posSide=pos_side or "")
 
+    # 交易
     def market(self, inst, side, sz, reduce_only=False, pos_side=None):
-        body = {"instId": inst, "tdMode": "isolated", "side": side, "ordType": "market", "sz": sz}
+        kw = {"instId": inst, "tdMode": "isolated", "side": side, "ordType": "market", "sz": sz}
         if pos_side:
-            body["posSide"] = pos_side
+            kw["posSide"] = pos_side
         elif reduce_only:
-            body["reduceOnly"] = True
-        return self.req("POST", "/api/v5/trade/order", body=body)[0]
+            kw["reduceOnly"] = "true"
+        return self._call(f"{inst} 下单", self.trade.place_order, **kw)[0]
 
     def pending_stops(self):
-        return [a for a in self.req("GET", "/api/v5/trade/orders-algo-pending",
-                                    {"ordType": "conditional", "instType": "SWAP"})
+        return [a for a in self._call("读取止损单", self.trade.order_algos_list, ordType="conditional", instType="SWAP")
                 if (a.get("algoClOrdId") or "").startswith(TAG)]
 
     def cancel_algos(self, algos):
         if algos:
-            self.req("POST", "/api/v5/trade/cancel-algos",
-                     body=[{"algoId": a["algoId"], "instId": a["instId"]} for a in algos])
+            self._call("撤销止损单", self.trade.cancel_algo_order,
+                       [{"algoId": a["algoId"], "instId": a["instId"]} for a in algos])
 
     def place_stop(self, inst, sz, trigger, pos_side=None):
-        body = {"instId": inst, "tdMode": "isolated", "side": "sell", "ordType": "conditional", "sz": sz,
-                "slTriggerPx": trigger, "slOrdPx": "-1", "slTriggerPxType": "last",
-                "algoClOrdId": f"{TAG}{inst.split('-')[0]}{int(time.time())}"[:32]}
+        kw = {"instId": inst, "tdMode": "isolated", "side": "sell", "ordType": "conditional", "sz": sz,
+              "slTriggerPx": trigger, "slOrdPx": "-1", "slTriggerPxType": "last",
+              "algoClOrdId": f"{TAG}{inst.split('-')[0]}{int(time.time())}"[:32]}
         if pos_side:
-            body["posSide"] = pos_side
+            kw["posSide"] = pos_side
         else:
-            body["reduceOnly"] = True
-        return self.req("POST", "/api/v5/trade/order-algo", body=body)
+            kw["reduceOnly"] = "true"
+        return self._call(f"{inst} 挂保护止损单", self.trade.place_algo_order, **kw)
 
 
 # ---------------------------------------------------------------- 工具
@@ -178,7 +170,7 @@ def client(cfg):
 
 # ---------------------------------------------------------------- 调仓
 
-def plan(payload, cfg, ex, equity=None, positions=None):
+def plan(payload, cfg, ex, equity=None, positions=None, managed=None):
     """计算目标张数和需要执行的订单（不下单）。"""
     t = cfg["trading"]
     ins, px = ex.instruments(), ex.tickers()
@@ -189,6 +181,11 @@ def plan(payload, cfg, ex, equity=None, positions=None):
     by = {c["coin"]: c for c in payload["coins"]}
     pf = {p["coin"]: p for p in payload["summary"]["portfolio"]["coins"]}
     coins = [str(c).upper() for c in (t.get("coins") or list(pf))]
+    # bot 以前建过仓、但已不在交易名单里的币（例如季度更新后被移出），也要平掉
+    for inst in managed or []:
+        coin = inst.split("-")[0]
+        if coin not in coins:
+            coins.append(coin)
     rows = []
     for coin in coins:
         inst = f"{coin}-USDT-SWAP"
@@ -200,7 +197,7 @@ def plan(payload, cfg, ex, equity=None, positions=None):
             row["note"] = "OKX 没有这个 USDT 永续"
             continue
         if not c or not p:
-            row["note"] = "不在组合或暂无信号数据"
+            row["note"] = "已移出名单" if coin not in pf else "暂无信号数据"
             if cur:
                 row.update(action="sell", sz=cur, reduce=True, note=row["note"] + "，平掉已有仓位")
             continue
@@ -254,7 +251,7 @@ def rebalance(payload, cfg, live=False, notify=None, force=True):
     elif not dry:
         raise OKXError("config.yaml 里 trading.okx 的 api_key / api_secret / passphrase 没有填写")
     ps = "long" if pos_mode == "long_short_mode" else None
-    capital, rows = plan(payload, cfg, ex, equity, positions)
+    capital, rows = plan(payload, cfg, ex, equity, positions, st.get("managed"))
     lines = [f"本金 {capital:.2f}U" + (f"（账户权益 {equity:.2f}U）" if equity is not None else "（未连接账户，按配置本金计算）")]
     errors = []
     # 先减仓再加仓，释放保证金
@@ -303,7 +300,7 @@ def rebalance(payload, cfg, live=False, notify=None, force=True):
                 ex.place_stop(r["inst"], _fmt(p["sz"], r["lot"]), _px(trig, r["tick"]), ps)
             except OKXError as e:
                 errors.append(f"{r['coin']} 保护止损单：{e}")
-        st["managed"] = sorted(set(st.get("managed", [])) | set(positions))
+        st["managed"] = sorted(r["inst"] for r in rows if r["inst"] in positions)   # 只记录 bot 名单里的币
     held = [r for r in rows if (r["target"] or r["cur"])]
     lines.append("")
     lines.append("<b>目标持仓</b>")

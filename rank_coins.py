@@ -93,17 +93,24 @@ def backtest(df, cfg):
             "worst_trade": rd(t.min()), "days": len(df)}
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--top", type=int, default=40)
-    ap.add_argument("--core", type=int, default=12)
-    ap.add_argument("--min-days", type=int, default=365)
-    ap.add_argument("--dry-run", action="store_true")
-    args = ap.parse_args()
-    cfg = yaml.safe_load(open(os.path.join(HERE, "config.example.yaml"), encoding="utf-8"))
-    if os.path.exists(os.path.join(HERE, "config.yaml")):
-        import monitor
-        cfg = monitor.load_config(os.path.join(HERE, "config.yaml"))
+def generated_date(path=None):
+    """coins.yaml 的生成日期（_meta.generated），没有则返回 None。"""
+    path = path or os.path.join(HERE, "coins.yaml")
+    try:
+        meta = (yaml.safe_load(open(path, encoding="utf-8")) or {}).get("_meta") or {}
+        return datetime.strptime(str(meta.get("generated")), "%Y-%m-%d").date()
+    except Exception:
+        return None
+
+
+def rebuild(cfg, top=40, core=12, min_days=365, write=True, verbose=True):
+    """按流动性重建名单。返回 {"core": [...], "all": [...], "added": [...], "removed": [...],
+    "core_added": [...], "core_removed": [...]}。"""
+    say = print if verbose else (lambda *a, **k: None)
+    path = os.path.join(HERE, "coins.yaml")
+    old = {k: v for k, v in (yaml.safe_load(open(path, encoding="utf-8")) or {}).items()
+           if isinstance(v, dict) and v.get("grade")} if os.path.exists(path) else {}
+    old_core = [k for k, v in old.items() if v.get("grade") == "A"]
 
     info = exchanges._get(f"{exchanges.BINANCE}/api/v3/exchangeInfo", params={"permissions": "SPOT"})
     bases = sorted({s["baseAsset"] for s in info["symbols"]
@@ -112,66 +119,82 @@ def main():
     # 24 小时成交额先粗筛前 120，再用 30 天均值精排
     tick = {x["symbol"]: float(x["quoteVolume"]) for x in exchanges._get(f"{exchanges.BINANCE}/api/v3/ticker/24hr")}
     pre = sorted(bases, key=lambda b: -tick.get(b + "USDT", 0))[:120]
-    print(f"币安 USDT 现货 {len(bases)} 个，按 24h 成交额粗筛 {len(pre)} 个，计算 30 天均值…")
+    say(f"币安 USDT 现货 {len(bases)} 个，按 24h 成交额粗筛 {len(pre)} 个，计算 30 天均值…")
 
     def vol30(b):
         try:
             k = exchanges._get(f"{exchanges.BINANCE}/api/v3/klines",
                                params={"symbol": b + "USDT", "interval": "1d", "limit": 31})
-            return b, float(np.mean([float(x[7]) for x in k[:-1]])), None
-        except Exception as e:
-            return b, 0.0, str(e)
+            return b, float(np.mean([float(x[7]) for x in k[:-1]]))
+        except Exception:
+            return b, 0.0
     with ThreadPoolExecutor(8) as ex:
-        v = {b: q for b, q, _ in ex.map(vol30, pre)}
+        v = dict(ex.map(vol30, pre))
     ranked = sorted(pre, key=lambda b: -v[b])
 
-    print("拉取历史并回测…")
+    say("拉取历史并回测…")
     def hist(b):
         try:
             return b, binance_daily(b + "USDT")
         except Exception:
             return b, None
-    chosen, dfs = [], {}
+    dfs = {}
     with ThreadPoolExecutor(6) as ex:
-        for b, df in ex.map(hist, ranked[:args.top + 30]):
+        for b, df in ex.map(hist, ranked[:top + 30]):
             dfs[b] = df
-    for b in ranked:
-        df = dfs.get(b)
-        if df is not None and len(df) >= args.min_days:
-            chosen.append(b)
-        if len(chosen) >= args.top:
-            break
+    chosen = [b for b in ranked if dfs.get(b) is not None and len(dfs[b]) >= min_days][:top]
     if "BTC" not in chosen:
         chosen = ["BTC"] + chosen[:-1]
 
     okx = {i["instId"] for i in exchanges._get(f"{exchanges.OKX}/api/v5/public/instruments",
                                               params={"instType": "SWAP"})["data"] if i["state"] == "live"}
     hl = {u["name"] for u in exchanges._post(exchanges.HL, {"type": "meta"})["universe"] if not u.get("isDelisted")}
-    out = {}
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    out = {"_meta": {"generated": today, "top": top, "core": core, "min_days": min_days}}
     for i, b in enumerate(chosen):
-        out[b] = {"grade": "A" if i < args.core else "B", "liq_rank": i + 1,
+        out[b] = {"grade": "A" if i < core else "B", "liq_rank": i + 1,
                   "volume_30d_musd": round(v[b] / 1e6, 1),
                   "okx": f"{b}-USDT-SWAP" in okx, "hyperliquid": exchanges.hl_name(b, hl) is not None,
                   "backtest": backtest(dfs[b], cfg)}
         bt = out[b]["backtest"]
-        print(f"{i+1:>2} {b:<6} {'核心' if i < args.core else '候选'} 30天日均 {v[b]/1e6:>8.1f}M  "
-              f"历史 {bt['days']:>4} 天  回测年化 {bt['cagr']:+.0%} 回撤 {bt['max_dd']:.0%} 胜率 {bt['win_rate']:.0%}")
-    if args.dry_run:
-        return
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    hdr = f"""# 监控币种名单（{today} 由 rank_coins.py 生成，建议每季度重新生成一次）
-# 选币规则：币安 USDT 现货最近 30 天日均成交额排名，排除稳定币/包装币，至少 {args.min_days} 天历史
-# grade: A = 核心（流动性前 {args.core}，进入“我的组合”）；B = 候选（权重减半）；C = 只观察（手动添加）
+        say(f"{i+1:>2} {b:<6} {'核心' if i < core else '候选'} 30天日均 {v[b]/1e6:>8.1f}M  "
+            f"历史 {bt['days']:>4} 天  回测年化 {bt['cagr']:+.0%} 回撤 {bt['max_dd']:.0%} 胜率 {bt['win_rate']:.0%}")
+    new_core = chosen[:core]
+    res = {"core": new_core, "all": chosen,
+           "added": [c for c in chosen if c not in old], "removed": [c for c in old if c not in chosen],
+           "core_added": [c for c in new_core if c not in old_core],
+           "core_removed": [c for c in old_core if c not in new_core]}
+    if write:
+        hdr = f"""# 监控币种名单（{today} 由 rank_coins.py 生成；monitor.py 会按 universe.update_days 自动重建）
+# 选币规则：币安 USDT 现货最近 30 天日均成交额排名，排除稳定币/包装币，至少 {min_days} 天历史
+# grade: A = 核心（流动性前 {core}，portfolio.coins 为 auto 时进入“我的组合”）；B = 候选（权重减半）；C = 只观察（手动添加）
 # liq_rank: 流动性排名；volume_30d_musd: 30 天日均成交额（百万美元）
 # okx / hyperliquid: 是否有 USDT 永续
 # backtest: 全历史、默认参数、1x、只做多、含 25% 收盘止损和手续费/资金费的回测。
 #   这是样本内结果，只反映历史特征，不用于选币（滚动检验表明回测排名对下一年没有预测力）。
 #   win_rate 胜率；worst_trade 单笔最差（含止损）；hold_days 持仓天数中位数；r3_* 近 3 年
 """
-    open(os.path.join(HERE, "coins.yaml"), "w", encoding="utf-8").write(
-        hdr + yaml.safe_dump(out, allow_unicode=True, sort_keys=False, default_flow_style=None, width=220))
-    print(f"\n已写入 coins.yaml：{len(out)} 个币，核心 {args.core} 个：" + " ".join(chosen[:args.core]))
-    print("把 config.yaml 的 portfolio.coins 改成上面的核心名单，然后重启 monitor.py。")
+        tmp = path + ".tmp"
+        open(tmp, "w", encoding="utf-8").write(
+            hdr + yaml.safe_dump(out, allow_unicode=True, sort_keys=False, default_flow_style=None, width=220))
+        os.replace(tmp, path)
+        say(f"\n已写入 coins.yaml：{len(chosen)} 个币，核心 {core} 个：" + " ".join(new_core))
+    return res
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--top", type=int, default=None)
+    ap.add_argument("--core", type=int, default=None)
+    ap.add_argument("--min-days", type=int, default=None)
+    ap.add_argument("--dry-run", action="store_true")
+    args = ap.parse_args()
+    import monitor
+    cfg = monitor.load_config(os.path.join(HERE, "config.yaml"))
+    u = cfg["universe"]
+    res = rebuild(cfg, args.top or u["top"], args.core or u["core"], args.min_days or u["min_days"],
+                  write=not args.dry_run)
+    print("核心新进：", " ".join(res["core_added"]) or "无", "｜核心移出：", " ".join(res["core_removed"]) or "无")
 
 
 if __name__ == "__main__":

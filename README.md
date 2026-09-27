@@ -44,6 +44,7 @@ python monitor.py --snapshot out.html     # 计算一次，生成可离线打开
 - 实时价格用和日线相同的交易所，保证口径一致。
 - 全部使用公开行情接口，不需要 API key。币安使用公开行情域名 `data-api.binance.vision`，美国服务器也能访问。
 - 当前名单的 40 个币：37 个用 OKX，3 个用币安。每个币的数据来源显示在卡片上。
+- 自动交易只在 OKX 下单；模拟盘的合约比实盘少，模拟盘没有的币会被跳过。
 
 ## 更新频率
 
@@ -51,7 +52,7 @@ python monitor.py --snapshot out.html     # 计算一次，生成可离线打开
 |---|---|
 | 实时价格、盘中预警 | 每 `monitor.price_interval` 秒（默认 30），每个交易所一次批量请求 |
 | 日线信号、目标仓位、止损价 | 每天 UTC `monitor.daily_at`（默认 00:05）；启动时也会算一次 |
-| 币种名单 | 每次日线重算时重新读取 `coins.yaml` |
+| 币种名单 | 每次日线重算时重新读取 `coins.yaml`；每季度（`universe.update_days`）自动按流动性重建 |
 
 仓位信号只看**日线收盘**；盘中价格只用于预警，不改变目标仓位。
 
@@ -116,6 +117,21 @@ SOL:
 ## 自动交易（OKX）
 
 `trader.py` 按“我的组合”的目标仓位在 OKX USDT 永续上自动调仓：逐仓、只做多、市价单。
+使用 OKX 官方 Python SDK（`python-okx`）。
+
+### 配置（config.yaml）
+```yaml
+trading:
+  enabled: true          # 总开关
+  dry_run: true          # true = 只推送将要下的单，不下单
+  capital: 100           # 交易本金（U），实际使用 min(本金, 账户 USDT 权益)
+  okx:
+    api_key: "你的 API Key"
+    api_secret: "你的 Secret Key"
+    passphrase: "创建 API Key 时设置的密码"
+    demo: false          # true = 模拟盘（需要模拟盘里创建的 API Key）
+```
+`config.yaml` 已在 `.gitignore` 中，不会被提交；服务器上建议 `chmod 600 config.yaml`。
 
 ### 每天做什么（UTC 00:05 日线重算后，由 monitor.py 自动调用）
 1. 本金 = min(`trading.capital`, 账户 USDT 权益)。
@@ -172,11 +188,15 @@ OKX 每个合约有最小下单量。以 100U 本金、当前价格为例：ZEC 
 `coins.yaml` 由 `rank_coins.py` 生成：币安 USDT 现货最近 30 天日均成交额排名前 40（排除稳定币、包装币，
 至少 365 天历史），前 12 名为**核心**（进入“我的组合”），13–40 名为**候选**（资金分配时权重减半）。
 
+**自动更新**：`monitor.py` 每天检查 `coins.yaml` 的生成日期，超过 `universe.update_days`（默认 90 天，即每季度）
+就自动重建，并在 Telegram 推送核心币和候选币的变化。`portfolio.coins: auto` 时，“我的组合”和自动交易会自动跟随新的核心名单；
+被移出名单的币如果 bot 有仓位，会在下一次调仓时平掉。
+
+也可以手动运行：
 ```bash
-python rank_coins.py              # 重新生成 coins.yaml，建议每季度一次
+python rank_coins.py              # 立即重建 coins.yaml
 python rank_coins.py --dry-run    # 只看排名，不写文件
 ```
-生成后把打印出的核心名单填到 `config.yaml` 的 `portfolio.coins`，再重启 `monitor.py`。
 
 ### 为什么按流动性，而不是按回测表现
 

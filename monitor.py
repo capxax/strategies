@@ -295,10 +295,35 @@ class Monitor:
                 log("价格循环异常", traceback.format_exc())
             time.sleep(self.cfg["monitor"]["price_interval"])
 
+    def maybe_update_universe(self):
+        """coins.yaml 超过 universe.update_days 天就按流动性重建，并推送名单变化。"""
+        u = self.cfg["universe"]
+        if not u.get("auto_update") or getattr(self, "readonly", False):
+            return
+        import rank_coins
+        gen = rank_coins.generated_date()
+        if gen and (now_utc().date() - gen).days < int(u["update_days"]):
+            return
+        log("候选名单已过期（生成于 %s），开始按流动性重建…" % gen)
+        res = rank_coins.rebuild(self.cfg, u["top"], u["core"], u["min_days"], write=True, verbose=False)
+        j = lambda xs: "、".join(xs) or "无"
+        self.tg.send(f"🔄 <b>候选名单已按流动性更新</b>（上次 {gen or '未知'}）\n"
+                     f"核心 {len(res['core'])} 个：{j(res['core'])}\n"
+                     f"核心新进：{j(res['core_added'])}\n核心移出：{j(res['core_removed'])}\n"
+                     f"候选新进：{j([c for c in res['added'] if c not in res['core']])}\n"
+                     f"移出名单：{j(res['removed'])}"
+                     + ("\n\n自动交易会在下一次调仓时平掉移出名单的币。" if self.cfg["trading"].get("enabled") else ""))
+        self.payload = None                            # 触发用新名单重算
+
     def daily_loop(self):
         hh, mm = map(int, str(self.cfg["monitor"]["daily_at"]).split(":"))
         while True:
             try:
+                try:
+                    self.maybe_update_universe()
+                except Exception:
+                    log("名单更新失败", traceback.format_exc())
+                    self._once("err-universe", "⚠️ <b>候选名单自动更新失败</b>，继续使用旧名单。详见服务日志。")
                 n = now_utc()
                 target = n.replace(hour=hh, minute=mm, second=0, microsecond=0)
                 expected = (n - timedelta(days=1 if n >= target else 2)).strftime("%Y-%m-%d")

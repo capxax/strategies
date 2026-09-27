@@ -1,11 +1,12 @@
-# 监控币种名单（2026-09-27 由 rank_coins.py 生成，建议每季度重新生成一次）
+# 监控币种名单（2026-09-27 由 rank_coins.py 生成；monitor.py 会按 universe.update_days 自动重建）
 # 选币规则：币安 USDT 现货最近 30 天日均成交额排名，排除稳定币/包装币，至少 365 天历史
-# grade: A = 核心（流动性前 12，进入“我的组合”）；B = 候选（权重减半）；C = 只观察（手动添加）
+# grade: A = 核心（流动性前 12，portfolio.coins 为 auto 时进入“我的组合”）；B = 候选（权重减半）；C = 只观察（手动添加）
 # liq_rank: 流动性排名；volume_30d_musd: 30 天日均成交额（百万美元）
 # okx / hyperliquid: 是否有 USDT 永续
 # backtest: 全历史、默认参数、1x、只做多、含 25% 收盘止损和手续费/资金费的回测。
 #   这是样本内结果，只反映历史特征，不用于选币（滚动检验表明回测排名对下一年没有预测力）。
 #   win_rate 胜率；worst_trade 单笔最差（含止损）；hold_days 持仓天数中位数；r3_* 近 3 年
+_meta: {generated: '2026-09-27', top: 40, core: 12, min_days: 365}
 BTC:
   grade: A
   liq_rank: 1
