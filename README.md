@@ -18,7 +18,7 @@ python monitor.py                      # 打开 http://127.0.0.1:8765/
 
 其他用法：
 ```bash
-python monitor.py --config other.yaml     # 指定配置文件
+python monitor.py --config other.yaml     # 指定配置文件（相对路径先找当前目录，再找程序目录）
 python monitor.py --snapshot out.html     # 计算一次，生成可离线打开的静态页面
 ```
 

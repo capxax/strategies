@@ -369,7 +369,7 @@ def main():
     ap.add_argument("--status", action="store_true")
     ap.add_argument("--close-all", action="store_true")
     args = ap.parse_args()
-    cfg = monitor.load_config(args.config)
+    cfg = monitor.load_config(args.config, required=args.config != monitor.DEFAULT_CONFIG)
     if args.status:
         print(status(cfg))
         return

@@ -25,6 +25,7 @@ import signals  # noqa: E402
 import trader  # noqa: E402
 
 STATE_FILE = os.path.join(HERE, ".monitor_state.json")
+DEFAULT_CONFIG = os.path.join(HERE, "config.yaml")
 COINS_FILE = os.path.join(HERE, "coins.yaml")
 
 
@@ -39,13 +40,56 @@ def _merge(base, over):
     return base
 
 
-def load_config(path):
-    """以 config.example.yaml 为默认值，叠加用户的 config.yaml。"""
-    cfg = yaml.safe_load(open(os.path.join(HERE, "config.example.yaml"), encoding="utf-8"))
-    if os.path.exists(path):
-        _merge(cfg, yaml.safe_load(open(path, encoding="utf-8")))
+# 内置默认配置（与 config.example.yaml 一致）。用户配置里没写的项使用这里的值。
+DEFAULTS = {'telegram': {'bot_token': '', 'chat_ids': []},
+ 'server': {'host': '127.0.0.1', 'port': 8765, 'access_token': ''},
+ 'monitor': {'price_interval': 30,
+             'daily_at': '00:05',
+             'near_stop': 0.05,
+             'alerts': {'stop_break': True, 'near_stop': True, 'entry_watch': True, 'exit_watch': True},
+             'daily_report': True},
+ 'dashboard': {'history_days': 420, 'min_history': 300, 'chart_days': 180, 'refresh_seconds': 15},
+ 'universe': {'auto_update': True, 'update_days': 90, 'top': 40, 'core': 12, 'min_days': 365},
+ 'portfolio': {'capital': 100, 'first_batch': 0.5, 'gap_buffer': 0.1, 'coins': 'auto'},
+ 'trading': {'enabled': False,
+             'dry_run': True,
+             'capital': 100,
+             'coins': [],
+             'rebalance_threshold': 0.2,
+             'min_trade_usdt': 5,
+             'protective_buffer': 0.1,
+             'okx': {'api_key': '', 'api_secret': '', 'passphrase': '', 'demo': False}},
+ 'strategy': {'s1_fast': 12,
+              's1_slow': 26,
+              's2_n': 20,
+              's2_k': 1.5,
+              's2_atr': 10,
+              's3': [4, 6, 12],
+              's4_n': 20},
+ 'risk': {'stop_drawdown': 0.25,
+          'weight_cap': 0.25,
+          'b_grade_weight': 0.5,
+          'strong_follow_corr': 0.7,
+          'strong_follow_cap': 0.6,
+          'total_exposure_cap': 1.5},
+ 'leverage': {'default': 1, 'BTC': 2, 'ETH': 1.5, 'BNB': 1.5, 'HYPE': 1.5}}
+
+
+def load_config(path, required=False):
+    """内置默认值 + 用户配置文件。path 为相对路径时，先找当前目录，再找程序目录。"""
+    cfg = copy.deepcopy(DEFAULTS)
+    cands = [path] if os.path.isabs(path) else list(dict.fromkeys([os.path.abspath(path), os.path.join(HERE, path)]))
+    found = next((p for p in cands if os.path.exists(p)), None)
+    if found:
+        try:
+            _merge(cfg, yaml.safe_load(open(found, encoding="utf-8")) or {})
+        except yaml.YAMLError as e:
+            sys.exit(f"配置文件 {found} 格式错误：{e}")
+        log(f"使用配置文件 {found}")
+    elif required:
+        sys.exit(f"找不到配置文件 {path}（查找过：{'、'.join(cands)}）")
     else:
-        log(f"没有找到 {path}，使用 config.example.yaml 的默认配置")
+        log(f"没有找到 {path}，使用内置默认配置")
     return cfg
 
 
@@ -437,11 +481,11 @@ def make_handler(mon, cfg):
 
 def main():
     ap = argparse.ArgumentParser(description="趋势信号监控")
-    ap.add_argument("--config", default=os.path.join(HERE, "config.yaml"))
+    ap.add_argument("--config", default=DEFAULT_CONFIG)
     ap.add_argument("--test-telegram", action="store_true", help="发一条测试消息后退出")
     ap.add_argument("--snapshot", metavar="FILE", help="计算一次，生成静态 HTML 后退出")
     args = ap.parse_args()
-    cfg = load_config(args.config)
+    cfg = load_config(args.config, required=args.config != DEFAULT_CONFIG)
     tg = Telegram(cfg["telegram"].get("bot_token"), cfg["telegram"].get("chat_ids"))
     if args.test_telegram:
         if not tg.enabled:
