@@ -86,4 +86,51 @@ def synthetic(symbol="SYN", n=2500, seed=0):
 
 
 def load(source, symbol, **kw):
-    return {"yahoo": yahoo, "binance": binance, "synthetic": synthetic}[source](symbol, **kw)
+    return {"yahoo": yahoo, "binance": binance, "okx": okx, "hyperliquid": hyperliquid, "synthetic": synthetic}[source](symbol, **kw)
+
+
+def okx(inst="BTC-USDT-SWAP", start="2018-01-01", end=None, interval="1Dutc"):
+    """OKX 永续/现货日线（history-candles 分页，每页 100 根，从新往旧翻）。"""
+    import requests
+
+    def fetch():
+        rows, after = [], ""
+        t0 = int(pd.Timestamp(start, tz="UTC").timestamp() * 1000)
+        while True:
+            r = requests.get("https://www.okx.com/api/v5/market/history-candles", timeout=15,
+                             params={"instId": inst, "bar": interval, "limit": 100, "after": after})
+            batch = r.json().get("data", [])
+            if not batch:
+                break
+            rows += batch
+            after = batch[-1][0]
+            if int(after) <= t0 or len(batch) < 100:
+                break
+            time.sleep(0.12)  # 限频 20 次/2 秒
+        if not rows:
+            raise RuntimeError(f"OKX 无数据: {inst}")
+        df = pd.DataFrame([x[:6] for x in rows], columns=["time"] + COLS)
+        df.index = pd.to_datetime(df.pop("time").astype("int64"), unit="ms")
+        df = df.astype(float).sort_index()
+        return df[~df.index.duplicated()].loc[start:]
+    return _cached(f"okx_{inst}_{interval}_{start}_{end}", fetch)
+
+
+def hyperliquid(coin="BTC", start="2018-01-01", end=None, interval="1d"):
+    """Hyperliquid 永续 K 线（candleSnapshot，单次最多 5000 根）。"""
+    import requests
+
+    def fetch():
+        t0 = int(pd.Timestamp(start, tz="UTC").timestamp() * 1000)
+        r = requests.post("https://api.hyperliquid.xyz/info", timeout=20, json={
+            "type": "candleSnapshot",
+            "req": {"coin": coin, "interval": interval, "startTime": t0, "endTime": int(time.time() * 1000)}})
+        batch = r.json()
+        if not batch:
+            raise RuntimeError(f"Hyperliquid 无数据: {coin}")
+        df = pd.DataFrame({"open": [float(x["o"]) for x in batch], "high": [float(x["h"]) for x in batch],
+                           "low": [float(x["l"]) for x in batch], "close": [float(x["c"]) for x in batch],
+                           "volume": [float(x["v"]) for x in batch]},
+                          index=pd.to_datetime([x["t"] for x in batch], unit="ms"))
+        return df
+    return _cached(f"hl_{coin}_{interval}_{start}_{end}", fetch)
