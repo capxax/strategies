@@ -188,9 +188,9 @@ input[type=search]{width:130px}
   <div class="filters" role="toolbar" aria-label="筛选">
     <div class="seg" id="f-grade" role="group" aria-label="评级">
       <button type="button" data-v="all" aria-pressed="true">全部</button>
-      <button type="button" data-v="A" aria-pressed="false">A 推荐</button>
-      <button type="button" data-v="B" aria-pressed="false">B 可用</button>
-      <button type="button" data-v="C" aria-pressed="false">C 观察</button>
+      <button type="button" data-v="A" aria-pressed="false">核心</button>
+      <button type="button" data-v="B" aria-pressed="false">候选</button>
+      <button type="button" data-v="C" aria-pressed="false">观察</button>
     </div>
     <div class="seg" id="f-state" role="group" aria-label="仓位">
       <button type="button" data-v="all" aria-pressed="true">全部</button>
@@ -225,10 +225,10 @@ input[type=search]{width:130px}
   <section class="legend" aria-label="说明">
     <p><b>四个信号</b>　S1 EMA12/26 交叉；S2 肯特纳 EMA20±1.5×ATR10，收盘破上轨买入、跌破中线卖出；S3 PBX 4/6/12 多头排列入场、跌破慢线离场；S4 K 线面积 &gt; 0。目标仓位 = 四个信号的平均。</p>
     <p><b>止损价</b>　持仓以来最高收盘价 × 0.75。收盘跌破止损价时，不论信号如何都平仓，直到信号重新入场。</p>
-    <p><b>建议杠杆</b>　BTC 2x，ETH / BNB / HYPE 1.5x，其余 A、B 级 1x，C 级只观察不交易。一律逐仓。</p>
+    <p><b>建议杠杆</b>　BTC 2x，ETH / BNB / HYPE 1.5x，其余核心、候选币 1x，观察币不交易。一律逐仓。</p>
     <p><b>BTC 联动</b>　近 365 天日收益与 BTC 的相关系数；β 表示 BTC 涨跌 1% 时该币平均涨跌多少；信号一致率 = 该币与 BTC 同为持仓或同为空仓的天数占比。</p>
-    <p><b>回测</b>　全历史 1x 回测，默认参数，含 0.06% 手续费与年化 11% 资金费。“近 3 年”对比策略与持有的年化。</p>
-    <p><b>建议权重</b>　A、B 级币按 60 日波动率倒数分配（B 级减半），单币上限 25%；敞口 = 权重 × 目标仓位 × 杠杆，BTC 强跟随组合计不超过 60%，账户合计不超过 150%。</p>
+    <p><b>历史回测</b>　全历史、默认参数、1x、含 25% 止损与手续费、资金费。这是样本内结果，只反映这个币过去的特征；滚动检验表明它对未来没有预测力，选币按流动性。</p>
+    <p><b>建议权重</b>　核心、候选币按 60 日波动率倒数分配（候选减半），单币上限 25%；敞口 = 权重 × 目标仓位 × 杠杆，BTC 强跟随组合计不超过 60%，账户合计不超过 150%。</p>
   </section>
 </div>
 
@@ -240,6 +240,7 @@ const pc = (v, d=1) => v == null ? "—" : (v > 0 ? "+" : "") + (v*100).toFixed(
 const pp = (v, d=0) => v == null ? "—" : (v*100).toFixed(d) + "%";
 const cls = v => v == null ? "" : v >= 0 ? "up" : "down";
 const stateOf = c => c.pos >= 1 ? "full" : c.pos > 0 ? "part" : "flat";
+const GRADE = {A:"核心", B:"候选", C:"观察"};
 const stateTxt = {full:"满仓", part:"部分仓位", flat:"空仓"};
 const bucket = c => c.btc.corr365 == null ? "weak" : c.btc.corr365 >= .7 ? "strong" : c.btc.corr365 >= .5 ? "mid" : "weak";
 const bucketTxt = {strong:"强跟随", mid:"中等", weak:"弱"};
@@ -282,7 +283,7 @@ function card(c){
     <div class="band"></div>
     <div class="ch">
       <div class="coin">
-        <div class="name">${c.coin}<span class="chip ${c.grade}">${c.grade} 级</span><span class="chip">${c.lev ? c.lev + "x 逐仓" : "不交易"}</span></div>
+        <div class="name">${c.coin}<span class="chip ${c.grade}">${GRADE[c.grade]}${c.liq_rank ? " #" + c.liq_rank : ""}</span><span class="chip">${c.lev ? c.lev + "x 逐仓" : "不交易"}</span></div>
         <div class="venue">${venue}<br>K 线：${c.src} ${c.sym}</div>
       </div>
       <div class="px">
@@ -321,13 +322,13 @@ function card(c){
           <dt>β（相对 BTC）</dt><dd class="num">${b.beta == null ? "—" : b.beta.toFixed(2)}</dd>
           <dt>信号一致率</dt><dd class="num">${pp(b.agree)}</dd>
         </dl>
-        <h3>回测（1x，未计止损，全历史）</h3>
+        <h3>历史回测（1x，含止损，样本内）</h3>
         <dl>
           <dt>年化 / 最大回撤</dt><dd class="num">${pp(t.L1_cagr)} / ${pp(t.L1_max_dd)}</dd>
           <dt>持有 年化 / 回撤</dt><dd class="num">${pp(t.bh_cagr)} / ${pp(t.bh_max_dd)}</dd>
           <dt>近 3 年 策略 / 持有</dt><dd class="num">${pp(t.r3_cagr)} / ${pp(t.r3_bh_cagr)}</dd>
           <dt>夏普 · 持仓中位</dt><dd class="num">${t.L1_sharpe == null ? "—" : t.L1_sharpe.toFixed(2)} · ${t.hold_days == null ? "—" : t.hold_days.toFixed(0) + " 天"}</dd>
-          <dt>单笔最大浮亏（不止损）</dt><dd class="num">${pp(t.worst_mae)}</dd>
+          <dt>胜率 · 单笔最差</dt><dd class="num">${pp(t.win_rate)} · ${pp(t.worst_trade)}</dd>
         </dl>
       </div>
     </div>
@@ -368,7 +369,7 @@ function setupSeg(id, key){
 
 function refresh(){
   const S = DATA.summary, cs = DATA.coins;
-  $("#sub").textContent = `A/B/C 级 ${S.n} 个币 · 日线信号，UTC 00:00 收盘后更新 · 行情优先 OKX，其次币安`;
+  $("#sub").textContent = `流动性前 ${S.n} 个币 · 日线信号，UTC 00:00 收盘后更新 · 行情优先 OKX，其次币安`;
   const live = S.live_at ? `<span class="dot${S.server && S.server.errors && S.server.errors.length ? " bad" : ""}"></span>实时价 <span class="num">${S.live_at.slice(11)}</span> · ` : "";
   $("#gen").innerHTML = `${live}日线截至 <span class="num">${S.data_date}</span> 收盘` + (S.server ? ` · Telegram ${S.server.tg ? "已连接" : "未配置"}` : ` · 生成于 <span class="num">${S.generated}</span>`);
   const btcSt = S.btc_pos >= 1 ? "满仓（上升趋势）" : S.btc_pos > 0 ? "部分仓位" : "空仓（下降或震荡）";
@@ -378,7 +379,7 @@ function refresh(){
   $("#summary").innerHTML = [
     ["BTC 趋势", btcSt, `BTC ${fmtP(S.btc_price)}`],
     ["做多的币", `${S.long} / ${S.n}`, `其中满仓 ${S.full} 个`],
-    ["市场宽度", pp(breadth), "A/B 级中目标仓位 ≥50% 的占比"],
+    ["市场宽度", pp(breadth), "核心和候选币中目标仓位 ≥50% 的占比"],
     ["建议总敞口", pp(S.exposure), `权重 × 仓位 × 杠杆，上限 ${pp(S.exposure_cap ?? 1.5)}`],
     ["今日调仓", `${newBuys} 加 · ${newSells} 减`, "相对前一日目标仓位"],
   ].map(([k,v,s]) => `<div class="stat"><span class="k">${k}</span><span class="v num">${v}</span><span class="s">${s}</span></div>`).join("");

@@ -120,7 +120,8 @@ def coin_card(coin, meta, src, df, btc_ret, btc_pos, cfg):
         "bt": {"L1_cagr": bt.get("cagr"), "L1_max_dd": bt.get("max_dd"), "L1_sharpe": bt.get("sharpe"),
                "bh_cagr": bt.get("bh_cagr"), "bh_max_dd": bt.get("bh_max_dd"), "r3_cagr": bt.get("r3_cagr"),
                "r3_bh_cagr": bt.get("r3_bh_cagr"), "hold_days": bt.get("hold_days"),
-               "worst_mae": bt.get("worst_mae"), "days": bt.get("days")},
+               "win_rate": bt.get("win_rate"), "worst_trade": bt.get("worst_trade"), "days": bt.get("days")},
+        "liq_rank": meta.get("liq_rank"), "volume_30d": meta.get("volume_30d_musd"),
         "chart": {
             "t": [d.strftime("%Y-%m-%d") for d in tail.index],
             "c": [float(x) for x in tail.close],
