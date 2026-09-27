@@ -16,7 +16,7 @@ monitor.py 在 trading.enabled 为 true 时，每天日线重算后自动调用�
   5. 每个持仓挂一张保护止损单（止损价再往下 protective_buffer），只防盘中暴跌；
      正常止损按日线收盘价由 bot 执行（与回测一致）
 """
-import argparse, json, os, sys, time
+import argparse, json, os, sys, time, traceback
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_DOWN
 
@@ -43,7 +43,7 @@ class OKX:
         flag = "1" if demo else "0"                       # 1 = 模拟盘，0 = 实盘
         k = (key or "-1", secret or "-1", passphrase or "-1")
         self.public = PublicData.PublicAPI(flag=flag, debug=False)
-        self.market = MarketData.MarketAPI(flag=flag, debug=False)
+        self.mkt = MarketData.MarketAPI(flag=flag, debug=False)
         # use_server_time=True：用 OKX 服务器时间签名，本机时钟不准也不会被拒（50102）
         self.account = Account.AccountAPI(*k, True, flag, debug=False)
         self.trade = Trade.TradeAPI(*k, True, flag, debug=False)
@@ -74,7 +74,7 @@ class OKX:
         return {i["instId"]: i for i in self._call("获取合约信息", self.public.get_instruments, instType="SWAP")}
 
     def tickers(self):
-        return {x["instId"]: float(x["last"]) for x in self._call("获取行情", self.market.get_tickers, instType="SWAP")
+        return {x["instId"]: float(x["last"]) for x in self._call("获取行情", self.mkt.get_tickers, instType="SWAP")
                 if x.get("last")}
 
     # 账户
@@ -378,8 +378,10 @@ def rebalance(payload, cfg, live=False, notify=None, force=True):
                 errors.append(f"{row['coin']}：订单状态 {d.get('state')}，成交 {fsz} 张")
                 return desc + f" ⚠️ {d.get('state')}"
             return desc + f" ✅ 成交价 {fpx:g}"
-        except OKXError as e:
-            journal_trade(cfg, {**rec, "state": "error", "error": str(e)})
+        except Exception as e:                         # 单个币出任何错误都不中断整次调仓（止损单照常重挂）
+            if not isinstance(e, OKXError):
+                log(f"{row['coin']} 下单异常", traceback.format_exc())
+            journal_trade(cfg, {**rec, "state": "error", "error": f"{type(e).__name__}: {e}"})
             errors.append(f"{row['coin']}：{e}")
             return desc + " ❌"
 
