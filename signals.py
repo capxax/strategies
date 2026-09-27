@@ -132,9 +132,10 @@ def coin_card(coin, meta, src, df, btc_ret, btc_pos, cfg):
 
 # ---------------------------------------------------------------- 全部币
 
-def _allocate(ok, risk):
-    """A/B 级按 60 日波动率倒数分配权重（B 级减半，单币上限），再套用强跟随组和总敞口上限。"""
-    trad = [c for c in ok if c["grade"] in ("A", "B")]
+def allocate(cards, risk):
+    """按 60 日波动率倒数分配权重（B 级乘以系数，单币上限），再套用强跟随组和总敞口上限。
+    返回 {coin: (weight, exposure)}，exposure 为名义敞口占总资金的比例。"""
+    trad = [c for c in cards if c["grade"] in ("A", "B")]
     inv = {c["coin"]: (risk["b_grade_weight"] if c["grade"] == "B" else 1.0) / c["vol60"]
            for c in trad if c["vol60"] > 0}
     w = {k: v / sum(inv.values()) for k, v in inv.items()} if inv else {}
@@ -150,18 +151,17 @@ def _allocate(ok, risk):
         tot = sum(rest.values())
         for k, v in rest.items():
             w[k] = v + free * v / tot
-    for c in ok:
-        c["weight"] = w.get(c["coin"], 0.0)
-        c["exposure"] = 0.0 if c["stopped"] else c["weight"] * c["pos"] * c["lev"]
-    strong = [c for c in ok if (c["btc"]["corr365"] or 0) >= risk["strong_follow_corr"]]
-    tot = sum(c["exposure"] for c in strong)
+    exp = {c["coin"]: 0.0 if c["stopped"] else w.get(c["coin"], 0.0) * c["pos"] * c["lev"] for c in cards}
+    strong = [c["coin"] for c in cards if (c["btc"]["corr365"] or 0) >= risk["strong_follow_corr"]]
+    tot = sum(exp[k] for k in strong)
     if tot > risk["strong_follow_cap"]:
-        for c in strong:
-            c["exposure"] *= risk["strong_follow_cap"] / tot
-    tot = sum(c["exposure"] for c in ok)
+        for k in strong:
+            exp[k] *= risk["strong_follow_cap"] / tot
+    tot = sum(exp.values())
     if tot > risk["total_exposure_cap"]:
-        for c in ok:
-            c["exposure"] *= risk["total_exposure_cap"] / tot
+        for k in exp:
+            exp[k] *= risk["total_exposure_cap"] / tot
+    return {c["coin"]: (w.get(c["coin"], 0.0), exp[c["coin"]]) for c in cards}
 
 
 def compute(cfg, coins, sources):
@@ -204,7 +204,22 @@ def compute(cfg, coins, sources):
     with ThreadPoolExecutor(4) as ex:
         cards = list(ex.map(one, coins))
     ok = [c for c in cards if "error" not in c]
-    _allocate(ok, cfg["risk"])
+    for k, (w, e) in allocate(ok, cfg["risk"]).items():
+        c = next(x for x in ok if x["coin"] == k)
+        c["weight"], c["exposure"] = w, e
+    # 我的组合：只在精选币种之间重新分配
+    pcfg = cfg.get("portfolio", {}) or {}
+    picks = [str(x).upper() for x in pcfg.get("coins", [])]
+    by = {c["coin"]: c for c in ok}
+    chosen = [by[k] for k in picks if k in by and by[k]["grade"] in ("A", "B")]
+    alloc = allocate(chosen, cfg["risk"])
+    portfolio = {
+        "capital": float(pcfg.get("capital", 10000)),
+        "first_batch": float(pcfg.get("first_batch", 0.5)),
+        "gap_buffer": float(pcfg.get("gap_buffer", 0.10)),
+        "coins": [{"coin": k, "weight": alloc[k][0], "exposure": alloc[k][1]} for k in picks if k in alloc],
+        "missing": [k for k in picks if k not in alloc],
+    }
     btc_card = next((c for c in ok if c["coin"] == "BTC"), None)
     summary = {
         "generated": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
@@ -216,5 +231,6 @@ def compute(cfg, coins, sources):
         "exposure": sum(c["exposure"] for c in ok),
         "exposure_cap": cfg["risk"]["total_exposure_cap"],
         "errors": [c for c in cards if "error" in c],
+        "portfolio": portfolio,
     }
     return {"summary": summary, "coins": ok}

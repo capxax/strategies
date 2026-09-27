@@ -118,6 +118,26 @@ input[type=search]{width:130px}
 .foot{border-top:1px solid var(--line);padding:9px 16px;font-size:12px;color:var(--muted);display:flex;flex-wrap:wrap;gap:4px 14px;background:var(--sunk)}
 .foot .flip b{color:var(--text)}
 
+.pf{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px;display:flex;flex-direction:column;gap:12px}
+.pf-head{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:10px 20px}
+.pf-sub{margin:4px 0 0;font-size:12.5px;color:var(--muted);max-width:70ch}
+.pf-ctl{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center}
+.pf-ctl label{font-size:12.5px;color:var(--muted);display:inline-flex;align-items:center;gap:8px}
+.pf-ctl input[type=number]{font:inherit;font-family:var(--mono);font-size:14px;width:130px;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:6px 10px}
+.pf-ctl .chk input{accent-color:var(--accent)}
+.pf-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.pf-stats div{background:var(--sunk);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:2px}
+.pf-stats .k{font-size:11.5px;color:var(--muted)} .pf-stats .v{font-size:17px;font-weight:500}
+.tbl-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:8px}
+.pf-tbl{border-collapse:collapse;width:100%;font-size:13px;white-space:nowrap}
+.pf-tbl th{font-size:11.5px;font-weight:600;color:var(--muted);text-align:left;padding:8px 10px;background:var(--sunk);border-bottom:1px solid var(--line)}
+.pf-tbl td{padding:7px 10px;border-bottom:1px solid var(--line);font-family:var(--mono);font-variant-numeric:tabular-nums}
+.pf-tbl td:first-child{font-family:var(--sans);font-weight:600}
+.pf-tbl .r{text-align:right}
+.pf-tbl tr.off td{color:var(--faint)}
+.pf-tbl tfoot td{font-weight:600;background:var(--sunk);border-bottom:0}
+.pf-tbl a{color:inherit;text-decoration:none;border-bottom:1px dotted var(--faint)}
+.pf-note{margin:0;font-size:12px;color:var(--muted);max-width:90ch}
 .legend{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:14px 16px;font-size:13px;color:var(--muted);display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:8px 24px}
 .legend b{color:var(--text);font-weight:600}
 .legend p{margin:0;max-width:65ch}
@@ -138,6 +158,31 @@ input[type=search]{width:130px}
   <section class="alerts" aria-label="需要关注">
     <h2>今日需要关注</h2>
     <div class="alert-list" id="alerts"></div>
+  </section>
+
+  <section class="pf" id="pf" aria-label="我的组合">
+    <div class="pf-head">
+      <div>
+        <h2>我的组合</h2>
+        <p class="pf-sub" id="pf-sub"></p>
+      </div>
+      <div class="pf-ctl">
+        <label for="pf-capital">总资金（U）<input type="number" id="pf-capital" min="0" step="100" inputmode="decimal"></label>
+        <label class="chk" for="pf-first"><input type="checkbox" id="pf-first"> 只显示首批（<span id="pf-first-pct"></span>）</label>
+      </div>
+    </div>
+    <div class="pf-stats" id="pf-stats"></div>
+    <div class="tbl-wrap">
+      <table class="pf-tbl">
+        <thead><tr>
+          <th>币</th><th>目标仓位</th><th>杠杆</th><th>权重</th><th class="r">下单金额</th><th class="r">下单数量</th>
+          <th class="r">保证金</th><th class="r">现价</th><th class="r">止损价</th><th class="r">距止损</th><th class="r">止损亏损</th><th class="r">最坏亏损</th>
+        </tr></thead>
+        <tbody id="pf-body"></tbody>
+        <tfoot id="pf-foot"></tfoot>
+      </table>
+    </div>
+    <p class="pf-note" id="pf-note"></p>
   </section>
 
   <div class="filters" role="toolbar" aria-label="筛选">
@@ -276,13 +321,13 @@ function card(c){
           <dt>β（相对 BTC）</dt><dd class="num">${b.beta == null ? "—" : b.beta.toFixed(2)}</dd>
           <dt>信号一致率</dt><dd class="num">${pp(b.agree)}</dd>
         </dl>
-        <h3>回测（1x）</h3>
+        <h3>回测（1x，未计止损，全历史）</h3>
         <dl>
           <dt>年化 / 最大回撤</dt><dd class="num">${pp(t.L1_cagr)} / ${pp(t.L1_max_dd)}</dd>
           <dt>持有 年化 / 回撤</dt><dd class="num">${pp(t.bh_cagr)} / ${pp(t.bh_max_dd)}</dd>
           <dt>近 3 年 策略 / 持有</dt><dd class="num">${pp(t.r3_cagr)} / ${pp(t.r3_bh_cagr)}</dd>
           <dt>夏普 · 持仓中位</dt><dd class="num">${t.L1_sharpe == null ? "—" : t.L1_sharpe.toFixed(2)} · ${t.hold_days == null ? "—" : t.hold_days.toFixed(0) + " 天"}</dd>
-          <dt>单笔最大浮亏</dt><dd class="num">${pp(t.worst_mae)}</dd>
+          <dt>单笔最大浮亏（不止损）</dt><dd class="num">${pp(t.worst_mae)}</dd>
         </dl>
       </div>
     </div>
@@ -349,6 +394,7 @@ function refresh(){
   $("#alerts").innerHTML = al.length ? al.map((a,i) => `<button type="button" class="alert ${a.t}" data-coin="${a.c.coin}">${a.txt}</button>`).join("")
     : `<span class="empty">今天没有仓位变化，也没有接近止损的持仓。</span>`;
   render();
+  renderPF();
 }
 
 function setup(){
@@ -368,6 +414,47 @@ function setup(){
   $("#f-sort").addEventListener("change", e => { F.sort = e.target.value; render(); });
   $("#f-q").addEventListener("input", e => { F.q = e.target.value; render(); });
 }
+
+// ---- 我的组合
+let PF_CAP = null, PF_FIRST = false;
+try { PF_CAP = parseFloat(localStorage.getItem("pf-capital")) || null; PF_FIRST = localStorage.getItem("pf-first") === "1"; } catch(e) {}
+const fmtU = v => v == null ? "—" : Math.round(v).toLocaleString("en-US");
+const fmtQ = v => v == null || !isFinite(v) ? "—" : v >= 100 ? Math.round(v).toLocaleString("en-US") : v >= 1 ? v.toFixed(2) : v.toPrecision(3);
+function renderPF(){
+  const P = DATA.summary.portfolio; if (!P) { $("#pf").hidden = true; return; }
+  $("#pf").hidden = false;
+  const cap = PF_CAP ?? P.capital, mult = PF_FIRST ? P.first_batch : 1;
+  if (document.activeElement !== $("#pf-capital")) $("#pf-capital").value = cap;
+  $("#pf-first").checked = PF_FIRST; $("#pf-first-pct").textContent = pp(P.first_batch);
+  const by = Object.fromEntries(DATA.coins.map(c => [c.coin, c]));
+  let tN = 0, tM = 0, tS = 0, tW = 0, rows = "";
+  P.coins.forEach(p => {
+    const c = by[p.coin]; if (!c) return;
+    const px = c.live ?? c.price, n = cap * p.exposure * mult, m = c.lev ? n / c.lev : 0;
+    const sd = c.live_stop_dist ?? c.stop_dist, loss = sd != null && n ? n * sd : null;
+    const worst = sd != null && n ? n * (sd - P.gap_buffer) : null;
+    tN += n; tM += m; tS += loss || 0; tW += worst || 0;
+    const st = c.stopped ? "止损离场" : pp(c.pos);
+    rows += `<tr class="${n ? "" : "off"}"><td><a href="#c-${c.coin}">${c.coin}</a></td><td>${st}</td><td>${c.lev}x</td><td>${pp(p.weight,1)}</td>
+      <td class="r">${fmtU(n)}</td><td class="r">${n ? fmtQ(n/px) : "—"}</td><td class="r">${fmtU(m)}</td><td class="r">${fmtP(px)}</td>
+      <td class="r">${fmtP(c.stop)}</td><td class="r">${sd != null && n ? pc(sd) : "—"}</td><td class="r">${loss != null ? fmtU(loss) : "—"}</td><td class="r">${worst != null ? fmtU(worst) : "—"}</td></tr>`;
+  });
+  $("#pf-body").innerHTML = rows;
+  $("#pf-foot").innerHTML = `<tr><td>合计</td><td></td><td></td><td></td><td class="r">${fmtU(tN)}</td><td></td><td class="r">${fmtU(tM)}</td><td></td><td></td><td></td><td class="r">${fmtU(tS)}</td><td class="r">${fmtU(tW)}</td></tr>`;
+  const held = P.coins.filter(p => by[p.coin] && by[p.coin].pos > 0 && !by[p.coin].stopped).length;
+  $("#pf-sub").textContent = `${P.coins.length} 个精选币（在 config.yaml 的 portfolio.coins 修改）· 当前 ${held} 个有仓位 · 下单金额 = 总资金 × 名义敞口${PF_FIRST ? " × 首批比例" : ""}`;
+  $("#pf-stats").innerHTML = [
+    ["下单总额（名义）", fmtU(tN) + " U", pp(cap ? tN/cap : 0) + " 的总资金"],
+    ["占用保证金", fmtU(tM) + " U", "逐仓，杠杆见表"],
+    ["剩余资金", fmtU(cap - tM) + " U", "留作缓冲，不要动"],
+    ["全部同时止损", fmtU(tS) + " U", pp(cap ? tS/cap : 0) + " 的总资金"],
+    ["含跳空的最坏情况", fmtU(tW) + " U", `止损距离再多 ${pp(P.gap_buffer)}`],
+  ].map(([k,v,s]) => `<div><span class="k">${k}</span><span class="v num">${v}</span><span class="k">${s}</span></div>`).join("");
+  $("#pf-note").textContent = "止损按日线收盘价判断（持仓以来最高收盘 × 0.75）。回测中带止损的交易，99% 的单笔亏损在 25% 以内，最差一笔 -38%，所以“最坏亏损”一列多算了 10% 的跳空缓冲。"
+    + (P.missing.length ? ` 以下精选币不在 coins.yaml 或暂无数据：${P.missing.join("、")}。` : "");
+}
+$("#pf-capital").addEventListener("input", e => { const v = parseFloat(e.target.value); PF_CAP = isFinite(v) && v >= 0 ? v : null; try { localStorage.setItem("pf-capital", PF_CAP ?? ""); } catch(_) {} renderPF(); });
+$("#pf-first").addEventListener("change", e => { PF_FIRST = e.target.checked; try { localStorage.setItem("pf-first", PF_FIRST ? "1" : "0"); } catch(_) {} renderPF(); });
 
 // 数据已内嵌（静态快照）时直接渲染；否则从监控服务拉取并定时刷新
 async function pull(){
