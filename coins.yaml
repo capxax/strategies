@@ -1,0 +1,310 @@
+# 监控币种名单与回测结果（2026-09 回测生成，508 个 OKX/Hyperliquid 永续币种中筛出）
+# grade: A = 推荐交易；B = 可交易，权重减半（历史较短）；C = 只观察，不交易
+# okx / hyperliquid: 该币是否在对应交易所有 USDT 永续
+# backtest: 日线 S1–S4 默认参数、1x、只做多的全历史回测（cagr 年化、max_dd 最大回撤、r3_* 为近 3 年）
+# 增删币种直接编辑本文件；D 级币种不要加入。
+SOL:
+  grade: A
+  okx: true
+  hyperliquid: true
+  backtest: {cagr: 1.2108, max_dd: -0.582, sharpe: 1.4555, bh_cagr: 0.8002, bh_max_dd: -0.9627, r3_cagr: 0.8089, r3_bh_cagr: 0.8529, hold_days: 26.0, worst_mae: -0.6202, days: 2238}
+FET:
+  grade: A
+  okx: true
+  hyperliquid: true
+  backtest: {cagr: 0.9973, max_dd: -0.6936, sharpe: 1.2351, bh_cagr: -0.0489, bh_max_dd: -0.9777, r3_cagr: 0.6484, r3_bh_cagr: 0.0434, hold_days: 15.0, worst_mae: -0.3956, days: 2768}
+ZEC:
+  grade: A
+  okx: true
+  hyperliquid: true
+  backtest: {cagr: 0.8418, max_dd: -0.6803, sharpe: 1.1604, bh_cagr: 0.5712, bh_max_dd: -0.9428, r3_cagr: 2.525, r3_bh_cagr: 2.974, hold_days: 28.5, worst_mae: -0.4694, days: 2747}
+AXS:
+  grade: A
+  okx: true
+  hyperliquid: true
+  backtest: {cagr: 0.9672, max_dd: -0.6524, sharpe: 1.1389, bh_cagr: 0.4234, bh_max_dd: -0.995, r3_cagr: 0.0185, r3_bh_cagr: -0.362, hold_days: 24.0, worst_mae: -0.4001, days: 2153}
+RUNE:
+  grade: A
+  okx: false
+  hyperliquid: true
+  backtest: {cagr: 0.7621, max_dd: -0.6595, sharpe: 1.1258, bh_cagr: -0.0091, bh_max_dd: -0.9842, r3_cagr: 0.2939, r3_bh_cagr: -0.2373, hold_days: 32.0, worst_mae: -0.4395, days: 2214}
+NEAR:
+  grade: A
+  okx: true
+  hyperliquid: true
+  backtest: {cagr: 0.7734, max_dd: -0.8135, sharpe: 1.0917, bh_cagr: 0.2781, bh_max_dd: -0.9523, r3_cagr: 0.6299, r3_bh_cagr: 0.6701, hold_days: 31.5, worst_mae: -0.5121, days: 2174}
+EGLD:
+  grade: A
+  okx: true
+  hyperliquid: false
+  backtest: {cagr: 0.6547, max_dd: -0.6679, sharpe: 1.084, bh_cagr: -0.1963, bh_max_dd: -0.9949, r3_cagr: 0.1009, r3_bh_cagr: -0.4228, hold_days: 21.5, worst_mae: -0.3958, days: 2215}
+RAY:
+  grade: A
+  okx: true
+  hyperliquid: false
+  backtest: {cagr: 0.8207, max_dd: -0.6266, sharpe: 1.0833, bh_cagr: -0.1294, bh_max_dd: -0.9916, r3_cagr: 2.1254, r3_bh_cagr: 1.3021, hold_days: 31.0, worst_mae: -0.3205, days: 1874}
+INJ:
+  grade: A
+  okx: true
+  hyperliquid: true
+  backtest: {cagr: 0.7191, max_dd: -0.7366, sharpe: 1.0689, bh_cagr: 0.4729, bh_max_dd: -0.9475, r3_cagr: 0.4123, r3_bh_cagr: 0.0292, hold_days: 38.5, worst_mae: -0.4576, days: 2167}
+BNB:
+  grade: A
+  okx: true
+  hyperliquid: true
+  backtest: {cagr: 0.5966, max_dd: -0.5362, sharpe: 1.0586, bh_cagr: 0.6763, bh_max_dd: -0.8002, r3_cagr: 0.2082, r3_bh_cagr: 0.5373, hold_days: 26.0, worst_mae: -0.3835, days: 3191}
+PEPE:
+  grade: A
+  okx: true
+  hyperliquid: true
+  backtest: {cagr: 0.7785, max_dd: -0.571, sharpe: 1.0566, bh_cagr: 0.0477, bh_max_dd: -0.912, r3_cagr: 0.9706, r3_bh_cagr: 0.8491, hold_days: 30.5, worst_mae: -0.5271, days: 1241}
+SUPER:
+  grade: A
+  okx: false
+  hyperliquid: true
+  backtest: {cagr: 0.7127, max_dd: -0.6834, sharpe: 1.0562, bh_cagr: -0.3749, bh_max_dd: -0.983, r3_cagr: 1.8716, r3_bh_cagr: 0.3879, hold_days: 22.0, worst_mae: -0.6764, days: 2012}
+THETA:
+  grade: A
+  okx: true
+  hyperliquid: false
+  backtest: {cagr: 0.6435, max_dd: -0.802, sharpe: 1.0539, bh_cagr: 0.0881, bh_max_dd: -0.9913, r3_cagr: 0.4558, r3_bh_cagr: -0.2865, hold_days: 20.0, worst_mae: -0.4413, days: 2727}
+ADA:
+  grade: A
+  okx: true
+  hyperliquid: true
+  backtest: {cagr: 0.5096, max_dd: -0.6455, sharpe: 0.9865, bh_cagr: 0.0047, bh_max_dd: -0.9515, r3_cagr: 0.2655, r3_bh_cagr: 0.0094, hold_days: 23.0, worst_mae: -0.4298, days: 3085}
+AVAX:
+  grade: A
+  okx: true
+  hyperliquid: true
+  backtest: {cagr: 0.5824, max_dd: -0.7552, sharpe: 0.9518, bh_cagr: 0.1256, bh_max_dd: -0.9563, r3_cagr: 0.3552, r3_bh_cagr: 0.0624, hold_days: 25.0, worst_mae: -0.6632, days: 2196}
+FLOKI:
+  grade: A
+  okx: true
+  hyperliquid: true
+  backtest: {cagr: 0.6293, max_dd: -0.655, sharpe: 0.9359, bh_cagr: -0.137, bh_max_dd: -0.9375, r3_cagr: 0.7596, r3_bh_cagr: 0.2303, hold_days: 37.0, worst_mae: -0.8513, days: 1241}
+ETH:
+  grade: A
+  okx: true
+  hyperliquid: true
+  backtest: {cagr: 0.4036, max_dd: -0.4626, sharpe: 0.9286, bh_cagr: 0.1565, bh_max_dd: -0.9397, r3_cagr: 0.2393, r3_bh_cagr: 0.1905, hold_days: 29.0, worst_mae: -0.3939, days: 3191}
+DOGE:
+  grade: A
+  okx: true
+  hyperliquid: true
+  backtest: {cagr: 0.7948, max_dd: -0.7562, sharpe: 0.9117, bh_cagr: 0.5597, bh_max_dd: -0.9233, r3_cagr: 0.4149, r3_bh_cagr: 0.1674, hold_days: 31.0, worst_mae: -0.6069, days: 2641}
+SUI:
+  grade: A
+  okx: true
+  hyperliquid: true
+  backtest: {cagr: 0.4525, max_dd: -0.6075, sharpe: 0.9061, bh_cagr: -0.0533, bh_max_dd: -0.8768, r3_cagr: 0.5271, r3_bh_cagr: 0.3838, hold_days: 18.0, worst_mae: -0.843, days: 1243}
+PENDLE:
+  grade: A
+  okx: true
+  hyperliquid: true
+  backtest: {cagr: 0.4754, max_dd: -0.538, sharpe: 0.9056, bh_cagr: 0.4049, bh_max_dd: -0.8549, r3_cagr: 0.5805, r3_bh_cagr: 0.5995, hold_days: 25.0, worst_mae: -0.2809, days: 1182}
+BTC:
+  grade: A
+  okx: true
+  hyperliquid: true
+  backtest: {cagr: 0.2941, max_dd: -0.4794, sharpe: 0.8791, bh_cagr: 0.2344, bh_max_dd: -0.8118, r3_cagr: 0.302, r3_bh_cagr: 0.4756, hold_days: 26.5, worst_mae: -0.385, days: 3191}
+GRT:
+  grade: A
+  okx: true
+  hyperliquid: false
+  backtest: {cagr: 0.4841, max_dd: -0.5818, sharpe: 0.8763, bh_cagr: -0.2275, bh_max_dd: -0.9944, r3_cagr: 0.428, r3_bh_cagr: -0.3169, hold_days: 21.5, worst_mae: -0.4114, days: 2110}
+HBAR:
+  grade: A
+  okx: true
+  hyperliquid: true
+  backtest: {cagr: 0.537, max_dd: -0.7892, sharpe: 0.8637, bh_cagr: 0.1481, bh_max_dd: -0.9277, r3_cagr: 0.645, r3_bh_cagr: 0.2367, hold_days: 15.5, worst_mae: -0.5135, days: 2555}
+ONE:
+  grade: A
+  okx: true
+  hyperliquid: false
+  backtest: {cagr: 0.514, max_dd: -0.7448, sharpe: 0.857, bh_cagr: -0.2744, bh_max_dd: -0.9982, r3_cagr: 0.0586, r3_bh_cagr: -0.3773, hold_days: 19.0, worst_mae: -0.558, days: 2675}
+SEI:
+  grade: A
+  okx: true
+  hyperliquid: true
+  backtest: {cagr: 0.4017, max_dd: -0.6546, sharpe: 0.8208, bh_cagr: -0.2536, bh_max_dd: -0.9634, r3_cagr: 0.4536, r3_bh_cagr: -0.1512, hold_days: 28.5, worst_mae: -0.4912, days: 1139}
+ENJ:
+  grade: A
+  okx: true
+  hyperliquid: false
+  backtest: {cagr: 0.3844, max_dd: -0.7284, sharpe: 0.7844, bh_cagr: -0.2099, bh_max_dd: -0.9961, r3_cagr: 0.065, r3_bh_cagr: -0.483, hold_days: 26.0, worst_mae: -0.3656, days: 2719}
+SUSHI:
+  grade: A
+  okx: true
+  hyperliquid: true
+  backtest: {cagr: 0.3553, max_dd: -0.8501, sharpe: 0.7652, bh_cagr: -0.4368, bh_max_dd: -0.9935, r3_cagr: 0.3456, r3_bh_cagr: -0.2287, hold_days: 21.0, worst_mae: -0.6017, days: 2217}
+CRO:
+  grade: A
+  okx: true
+  hyperliquid: false
+  backtest: {cagr: 0.3531, max_dd: -0.6876, sharpe: 0.761, bh_cagr: -0.1856, bh_max_dd: -0.9482, r3_cagr: 0.5146, r3_bh_cagr: 0.1075, hold_days: 24.0, worst_mae: -0.5241, days: 1997}
+STX:
+  grade: A
+  okx: true
+  hyperliquid: true
+  backtest: {cagr: 0.3736, max_dd: -0.7611, sharpe: 0.7604, bh_cagr: -0.0133, bh_max_dd: -0.9672, r3_cagr: 0.2986, r3_bh_cagr: -0.0918, hold_days: 25.0, worst_mae: -0.5877, days: 2529}
+ZIL:
+  grade: A
+  okx: true
+  hyperliquid: false
+  backtest: {cagr: 0.3885, max_dd: -0.6278, sharpe: 0.7561, bh_cagr: -0.1896, bh_max_dd: -0.9905, r3_cagr: 0.0488, r3_bh_cagr: -0.3948, hold_days: 24.0, worst_mae: -0.7034, days: 2777}
+GALA:
+  grade: A
+  okx: true
+  hyperliquid: true
+  backtest: {cagr: 0.41, max_dd: -0.7161, sharpe: 0.7543, bh_cagr: -0.4532, bh_max_dd: -0.9981, r3_cagr: 0.2678, r3_bh_cagr: -0.447, hold_days: 20.0, worst_mae: -0.3862, days: 1840}
+UNI:
+  grade: A
+  okx: true
+  hyperliquid: true
+  backtest: {cagr: 0.3185, max_dd: -0.6432, sharpe: 0.7235, bh_cagr: 0.1864, bh_max_dd: -0.9444, r3_cagr: 0.3345, r3_bh_cagr: 0.3153, hold_days: 24.0, worst_mae: -0.5389, days: 2201}
+ZEN:
+  grade: A
+  okx: true
+  hyperliquid: true
+  backtest: {cagr: 0.3075, max_dd: -0.7946, sharpe: 0.7148, bh_cagr: 0.0197, bh_max_dd: -0.9742, r3_cagr: 0.1435, r3_bh_cagr: 0.0168, hold_days: 35.5, worst_mae: -0.3802, days: 2274}
+DOT:
+  grade: A
+  okx: true
+  hyperliquid: true
+  backtest: {cagr: 0.2926, max_dd: -0.6952, sharpe: 0.714, bh_cagr: -0.1389, bh_max_dd: -0.986, r3_cagr: 0.0895, r3_bh_cagr: -0.3232, hold_days: 27.0, worst_mae: -0.8471, days: 2231}
+SHIB:
+  grade: A
+  okx: true
+  hyperliquid: true
+  backtest: {cagr: 0.2933, max_dd: -0.7011, sharpe: 0.6642, bh_cagr: -0.2795, bh_max_dd: -0.948, r3_cagr: 0.1598, r3_bh_cagr: -0.0652, hold_days: 22.5, worst_mae: -0.2927, days: 1966}
+KSM:
+  grade: A
+  okx: true
+  hyperliquid: false
+  backtest: {cagr: 0.2768, max_dd: -0.7392, sharpe: 0.6454, bh_cagr: -0.3011, bh_max_dd: -0.9952, r3_cagr: 0.1531, r3_bh_cagr: -0.3665, hold_days: 21.0, worst_mae: -0.6797, days: 2214}
+QNT:
+  grade: A
+  okx: true
+  hyperliquid: false
+  backtest: {cagr: 0.2297, max_dd: -0.5682, sharpe: 0.6382, bh_cagr: 0.0239, bh_max_dd: -0.8876, r3_cagr: 0.2725, r3_bh_cagr: 0.2025, hold_days: 17.0, worst_mae: -0.5311, days: 1886}
+AR:
+  grade: A
+  okx: true
+  hyperliquid: true
+  backtest: {cagr: 0.2194, max_dd: -0.8633, sharpe: 0.614, bh_cagr: -0.2879, bh_max_dd: -0.9821, r3_cagr: 0.2484, r3_bh_cagr: 0.0431, hold_days: 23.0, worst_mae: -0.4606, days: 1962}
+WLD:
+  grade: A
+  okx: true
+  hyperliquid: true
+  backtest: {cagr: 0.194, max_dd: -0.728, sharpe: 0.6096, bh_cagr: -0.3599, bh_max_dd: -0.98, r3_cagr: 0.1841, r3_bh_cagr: -0.3235, hold_days: 29.0, worst_mae: -0.4282, days: 1161}
+ZRX:
+  grade: A
+  okx: true
+  hyperliquid: false
+  backtest: {cagr: 0.2051, max_dd: -0.7487, sharpe: 0.5907, bh_cagr: -0.0835, bh_max_dd: -0.9675, r3_cagr: 0.3173, r3_bh_cagr: -0.1123, hold_days: 27.0, worst_mae: -0.5779, days: 2768}
+BONK:
+  grade: A
+  okx: true
+  hyperliquid: true
+  backtest: {cagr: 0.1934, max_dd: -0.6279, sharpe: 0.5848, bh_cagr: -0.4892, bh_max_dd: -0.9585, r3_cagr: 0.1934, r3_bh_cagr: -0.4892, hold_days: 26.0, worst_mae: -0.3166, days: 1017}
+CAKE:
+  grade: A
+  okx: false
+  hyperliquid: true
+  backtest: {cagr: 0.1568, max_dd: -0.7505, sharpe: 0.5352, bh_cagr: -0.2915, bh_max_dd: -0.9753, r3_cagr: 0.1516, r3_bh_cagr: 0.3344, hold_days: 24.0, worst_mae: -0.4444, days: 2046}
+ALGO:
+  grade: A
+  okx: true
+  hyperliquid: true
+  backtest: {cagr: 0.139, max_dd: -0.7076, sharpe: 0.5129, bh_cagr: -0.3308, bh_max_dd: -0.9674, r3_cagr: 0.2841, r3_bh_cagr: 0.0736, hold_days: 22.0, worst_mae: -0.5072, days: 2654}
+VVV:
+  grade: B
+  okx: true
+  hyperliquid: true
+  backtest: {cagr: 2.1428, max_dd: -0.582, sharpe: 1.6652, bh_cagr: 1.0204, bh_max_dd: -0.8994, r3_cagr: 2.1428, r3_bh_cagr: 1.0204, hold_days: 21.0, worst_mae: -0.3071, days: 607}
+ZORA:
+  grade: B
+  okx: true
+  hyperliquid: true
+  backtest: {cagr: 2.8041, max_dd: -0.4961, sharpe: 1.5718, bh_cagr: -0.4179, bh_max_dd: -0.9611, r3_cagr: 2.8041, r3_bh_cagr: -0.4179, hold_days: 31.5, worst_mae: -0.4595, days: 522}
+HYPE:
+  grade: B
+  okx: true
+  hyperliquid: true
+  backtest: {cagr: 0.7037, max_dd: -0.4033, sharpe: 1.2063, bh_cagr: 1.2666, bh_max_dd: -0.6423, r3_cagr: 0.7037, r3_bh_cagr: 1.2666, hold_days: 38.0, worst_mae: -0.2573, days: 583}
+PENGU:
+  grade: B
+  okx: true
+  hyperliquid: true
+  backtest: {cagr: 0.6675, max_dd: -0.5806, sharpe: 1.0416, bh_cagr: -0.4496, bh_max_dd: -0.9101, r3_cagr: 0.6675, r3_bh_cagr: -0.4496, hold_days: 21.5, worst_mae: -0.3635, days: 649}
+ENA:
+  grade: B
+  okx: true
+  hyperliquid: true
+  backtest: {cagr: 0.5809, max_dd: -0.5666, sharpe: 0.9813, bh_cagr: -0.3459, bh_max_dd: -0.9511, r3_cagr: 0.5809, r3_bh_cagr: -0.3459, hold_days: 38.0, worst_mae: -0.318, days: 908}
+MUBARAK:
+  grade: B
+  okx: true
+  hyperliquid: false
+  backtest: {cagr: 0.3152, max_dd: -0.7539, sharpe: 0.7485, bh_cagr: -0.332, bh_max_dd: -0.9081, r3_cagr: 0.3152, r3_bh_cagr: -0.332, hold_days: 28.0, worst_mae: -0.9121, days: 549}
+MNT:
+  grade: B
+  okx: false
+  hyperliquid: true
+  backtest: {cagr: 0.3017, max_dd: -0.5691, sharpe: 0.747, bh_cagr: -0.2371, bh_max_dd: -0.8541, r3_cagr: 0.3017, r3_bh_cagr: -0.2371, hold_days: 21.0, worst_mae: -0.4382, days: 905}
+DOOD:
+  grade: B
+  okx: true
+  hyperliquid: false
+  backtest: {cagr: 0.3046, max_dd: -0.5754, sharpe: 0.7056, bh_cagr: -0.5639, bh_max_dd: -0.9061, r3_cagr: 0.3046, r3_bh_cagr: -0.5639, hold_days: 29.0, worst_mae: -0.1847, days: 503}
+MOODENG:
+  grade: B
+  okx: true
+  hyperliquid: true
+  backtest: {cagr: 0.2107, max_dd: -0.7809, sharpe: 0.6473, bh_cagr: -0.4959, bh_max_dd: -0.9638, r3_cagr: 0.2107, r3_bh_cagr: -0.4959, hold_days: 19.0, worst_mae: -0.3887, days: 724}
+TRX:
+  grade: C
+  okx: true
+  hyperliquid: true
+  backtest: {cagr: 0.2248, max_dd: -0.5858, sharpe: 0.5997, bh_cagr: 0.2621, bh_max_dd: -0.8311, r3_cagr: 0.3317, r3_bh_cagr: 0.5796, hold_days: 33.0, worst_mae: -0.3743, days: 3030}
+XMR:
+  grade: C
+  okx: false
+  hyperliquid: true
+  backtest: {cagr: 0.1237, max_dd: -0.4186, sharpe: 0.4911, bh_cagr: 0.4471, bh_max_dd: -0.5873, r3_cagr: 0.1539, r3_bh_cagr: 0.5697, hold_days: 38.0, worst_mae: -0.4022, days: 1254}
+XAU:
+  grade: C
+  okx: true
+  hyperliquid: false
+  backtest: {cagr: 0.0697, max_dd: -0.2023, sharpe: 0.4608, bh_cagr: 0.2485, bh_max_dd: -0.2778, r3_cagr: 0.0697, r3_bh_cagr: 0.2485, hold_days: 34.0, worst_mae: -0.0644, days: 536}
+ARB:
+  grade: C
+  okx: true
+  hyperliquid: true
+  backtest: {cagr: 0.1028, max_dd: -0.5722, sharpe: 0.4428, bh_cagr: -0.3977, bh_max_dd: -0.9678, r3_cagr: 0.1967, r3_bh_cagr: -0.3544, hold_days: 29.5, worst_mae: -0.2842, days: 1284}
+BIO:
+  grade: C
+  okx: true
+  hyperliquid: true
+  backtest: {cagr: 0.0028, max_dd: -0.5729, sharpe: 0.4046, bh_cagr: -0.8452, bh_max_dd: -0.9802, r3_cagr: 0.0028, r3_bh_cagr: -0.8452, hold_days: 23.0, worst_mae: -0.2544, days: 632}
+AERO:
+  grade: C
+  okx: true
+  hyperliquid: true
+  backtest: {cagr: 0.0041, max_dd: -0.5574, sharpe: 0.3082, bh_cagr: -0.3229, bh_max_dd: -0.8737, r3_cagr: 0.0041, r3_bh_cagr: -0.3229, hold_days: 17.0, worst_mae: -0.2798, days: 662}
+KMNO:
+  grade: C
+  okx: true
+  hyperliquid: false
+  backtest: {cagr: 0.0085, max_dd: -0.5964, sharpe: 0.2894, bh_cagr: -0.2944, bh_max_dd: -0.8505, r3_cagr: 0.0085, r3_bh_cagr: -0.2944, hold_days: 23.0, worst_mae: -0.5758, days: 509}
+PAXG:
+  grade: C
+  okx: false
+  hyperliquid: true
+  backtest: {cagr: 0.0253, max_dd: -0.1913, sharpe: 0.2545, bh_cagr: 0.1353, bh_max_dd: -0.2807, r3_cagr: 0.0966, r3_bh_cagr: 0.3109, hold_days: 26.0, worst_mae: -0.0661, days: 2221}
+POL:
+  grade: C
+  okx: true
+  hyperliquid: true
+  backtest: {cagr: 0.0089, max_dd: -0.4929, sharpe: 0.2459, bh_cagr: -0.4521, bh_max_dd: -0.9039, r3_cagr: 0.0089, r3_bh_cagr: -0.4521, hold_days: 28.0, worst_mae: -0.1433, days: 744}

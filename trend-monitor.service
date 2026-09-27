@@ -1,0 +1,15 @@
+# systemd 服务：sudo cp trend-monitor.service /etc/systemd/system/ 后修改路径和用户
+[Unit]
+Description=Trend signal dashboard and Telegram monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/trend-monitor
+ExecStart=/usr/bin/python3 monitor.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,55 @@
+# 复制为 config.yaml 后修改：cp config.example.yaml config.yaml
+# config.yaml 含 Telegram token，已在 .gitignore 中排除，不要提交。
+
+telegram:
+  bot_token: ""                  # 找 @BotFather 创建机器人获得，留空则通知只打印到日志
+  chat_ids: []                   # 接收通知的 chat id，可以多个，例如 [123456789, -1001234567890]
+
+server:
+  host: 127.0.0.1                # 部署到服务器且要外网访问时改成 0.0.0.0，并设置 access_token
+  port: 8765
+  access_token: ""               # 设置后网页需要 ?token=xxx 才能访问
+
+monitor:
+  price_interval: 30             # 实时价格刷新间隔（秒）
+  daily_at: "00:05"              # 每天重算日线信号的时间（UTC），日线在 00:00 收盘
+  near_stop: 0.05                # 现价距止损价不到 5% 时预警
+  alerts:                        # 需要推送的盘中预警，不想收的改成 false
+    stop_break: true             # 盘中跌破止损价
+    near_stop: true              # 接近止损
+    entry_watch: true            # 空仓的币盘中突破肯特纳上轨（收盘确认后会加仓）
+    exit_watch: true             # 持仓的币盘中跌破肯特纳中线或 PBX 慢线（收盘不收回会减仓）
+  daily_report: true             # 每天收盘后推送日报
+
+dashboard:
+  history_days: 420              # 每个币拉取的日线天数（指标预热需要约 300 天）
+  min_history: 300               # 优先交易所的日线少于这个数时，改用下一个交易所（OKX > 币安 > Hyperliquid）
+  chart_days: 180                # 页面走势图显示的天数
+  refresh_seconds: 15            # 网页自动刷新间隔
+
+# 策略参数（与回测一致，改动后回测结果不再适用）
+strategy:
+  s1_fast: 12
+  s1_slow: 26
+  s2_n: 20
+  s2_k: 1.5
+  s2_atr: 10
+  s3: [4, 6, 12]
+  s4_n: 20
+
+# 风控（BOT_SPEC 第 4、10、11 节）
+risk:
+  stop_drawdown: 0.25            # 持仓以来最高收盘价回落 25% 止损
+  weight_cap: 0.25               # 单币权重上限
+  b_grade_weight: 0.5            # B 级币权重系数
+  strong_follow_corr: 0.70       # 与 BTC 相关系数达到此值算“强跟随”
+  strong_follow_cap: 0.60        # 强跟随组合计敞口上限
+  total_exposure_cap: 1.50       # 账户总名义敞口上限
+
+# 杠杆上限（逐仓）。未列出的 A/B 级币用 default，C 级不交易
+leverage:
+  default: 1
+  BTC: 2
+  ETH: 1.5
+  BNB: 1.5
+  HYPE: 1.5
